@@ -47,13 +47,13 @@ http[s]://<hosthame>[:<port>]/api/<route>
 Для `GET` запроса:
 ~~~postgresql
 /**
- * @param {text} patch - Путь
+ * @param {text} path - Путь
  * @param {jsonb} headers - HTTP заголовки
  * @param {jsonb} params - Параметры запроса
  * @return {SETOF json}
  */
 CREATE OR REPLACE FUNCTION http.get (
-  patch     text,
+  path      text,
   headers   jsonb,
   params    jsonb DEFAULT null
 ) RETURNS   SETOF json
@@ -62,14 +62,14 @@ CREATE OR REPLACE FUNCTION http.get (
 Для `POST` запроса:
 ~~~postgresql
 /**
- * @param {text} patch - Путь
+ * @param {text} path - Путь
  * @param {jsonb} headers - HTTP заголовки
  * @param {jsonb} params - Параметры запроса
  * @param {jsonb} body - Тело запроса
  * @return {SETOF json}
  */
 CREATE OR REPLACE FUNCTION http.post (
-  patch     text,
+  path      text,
   headers   jsonb,
   params    jsonb DEFAULT null,
   body      jsonb DEFAULT null
