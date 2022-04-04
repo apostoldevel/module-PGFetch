@@ -54,9 +54,6 @@ namespace Apostol {
 
         protected:
 
-            void DoDone(CHTTPReply *Reply);
-            void DoFail(const CString &Error);
-
             void SetAllow(bool Value) { m_Allow = Value; }
 
         public:
