@@ -41,11 +41,7 @@ SELECT * FROM http.fetch ORDER BY start DESC;
 В функцию `http.fetch()` можно передать имя функции обратного вызова как для обработки успешного ответа так и в случае сбоя.
 
 ```postgresql
-SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done');
-
-SELECT * FROM http.fetch('http://localhost:80801/api/v1/time', fail => 'http.fail');
-
-SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => '<schema>.<function_name>');
+SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
 ```
 
 Функции обратного вызова должна быть создана заранее и в качестве параметра она должна принимать уникальный номер исходящего запроса (тип `uuid`).
@@ -58,9 +54,7 @@ AS $$
 DECLARE
   r         record;
 BEGIN
-  SELECT q.method, q.resource, a.status, a.status_text, a.content INTO r
-  FROM http.request q INNER JOIN http.response a ON q.id = a.request
-  WHERE q.id = pRequest;
+  SELECT method, resource, status, status_text, response INTO r FROM http.fetch WHERE id = pRequest;
 
   RAISE NOTICE '% % % %', r.method, r.resource, r.status, r.status_text;
 END;
@@ -77,9 +71,7 @@ AS $$
 DECLARE
   r         record;
 BEGIN
-  SELECT method, resource, error INTO r
-  FROM http.request
-  WHERE id = pRequest;
+  SELECT method, resource, error INTO r FROM http.request WHERE id = pRequest;
 
   RAISE NOTICE 'ERROR: % % %', r.method, r.resource, r.error;
 END;
