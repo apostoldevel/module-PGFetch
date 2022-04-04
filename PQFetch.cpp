@@ -33,6 +33,46 @@ namespace Apostol {
 
     namespace Workers {
 
+        CFetchHandler::CFetchHandler(CPQFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
+                CPollConnection(AModule->ptrQueueManager()), m_Allow(true) {
+
+            m_pModule = AModule;
+            m_Payload = Data;
+            m_Handler = Handler;
+
+            AddToQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        CFetchHandler::~CFetchHandler() {
+            RemoveFromQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CFetchHandler::Close() {
+            m_Allow = false;
+            RemoveFromQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        int CFetchHandler::AddToQueue() {
+            return m_pModule->AddToQueue(this);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CFetchHandler::RemoveFromQueue() {
+            m_pModule->RemoveFromQueue(this);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        bool CFetchHandler::Handler() {
+            if (m_Allow && m_Handler) {
+                m_Handler(this);
+                return true;
+            }
+            return false;
+        }
+
         //--------------------------------------------------------------------------------------------------------------
 
         //-- CPQFetch -------------------------------------------------------------------------------------------------
@@ -41,6 +81,10 @@ namespace Apostol {
 
         CPQFetch::CPQFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pq fetch", "worker/PQFetch") {
             m_Headers.Add("Authorization");
+
+            m_CheckDate = 0;
+            m_Progress = 0;
+            m_MaxQueue = Config()->PostgresPollMin();
 
             CPQFetch::InitMethods();
         }
@@ -68,6 +112,83 @@ namespace Apostol {
             m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
             m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
 #endif
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::QueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+            auto pConnection = dynamic_cast<CHTTPServerConnection *> (APollQuery->Binding());
+            ReplyError(pConnection, CHTTPReply::internal_server_error, E.what());
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        CJSON CPQFetch::ParamsToJson(const CStringList &Params) {
+            CJSON Json;
+            for (int i = 0; i < Params.Count(); i++) {
+                Json.Object().AddPair(Params.Names(i), Params.Values(i));
+            }
+            return Json;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        CJSON CPQFetch::HeadersToJson(const CHeaders &Headers) {
+            CJSON Json;
+            for (int i = 0; i < Headers.Count(); i++) {
+                const auto &caHeader = Headers[i];
+                Json.Object().AddPair(caHeader.Name(), caHeader.Value());
+            }
+            return Json;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DoError(const Delphi::Exception::Exception &E) {
+            Log()->Error(APP_LOG_ERR, 0, "[PQFetch] Error: %s", E.what());
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DoConnected(CObject *Sender) {
+            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            if (Assigned(pConnection)) {
+                auto pSocket = pConnection->Socket();
+                if (pSocket != nullptr) {
+                    auto pHandle = pSocket->Binding();
+                    if (pHandle != nullptr) {
+                        Log()->Notice(_T("[%s:%d] Fetch client connected."), pHandle->PeerIP(), pHandle->PeerPort());
+                    }
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DoDisconnected(CObject *Sender) {
+            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            if (Assigned(pConnection)) {
+                auto pSocket = pConnection->Socket();
+                if (pSocket != nullptr) {
+                    auto pHandle = pSocket->Binding();
+                    if (pHandle != nullptr) {
+                        Log()->Notice(_T("[%s:%d] Fetch client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
+                    }
+                } else {
+                    Log()->Notice(_T("Fetch client disconnected."));
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
+#ifdef _DEBUG
+            const auto &connInfo = AConnection->ConnInfo();
+
+            DebugMessage("[NOTIFY] [%d] [postgresql://%s@%s:%s/%s] [PID: %d] [%s] %s\n",
+                         AConnection->Socket(), connInfo["user"].c_str(), connInfo["host"].c_str(), connInfo["port"].c_str(),
+                         connInfo["dbname"].c_str(), ANotify->be_pid, ANotify->relname, ANotify->extra);
+#endif
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+            new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoFetch(Handler); });
+#else
+            new CFetchHandler(this, ANotify->extra, std::bind(&CPQFetch::DoFetch, this, _1));
+#endif
+            UnloadQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -132,33 +253,163 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::QueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-            auto pConnection = dynamic_cast<CHTTPServerConnection *> (APollQuery->Binding());
-            ReplyError(pConnection, CHTTPReply::internal_server_error, E.what());
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
         void CPQFetch::DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
             QueryException(APollQuery, E);
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CJSON CPQFetch::ParamsToJson(const CStringList &Params) {
-            CJSON Json;
-            for (int i = 0; i < Params.Count(); i++) {
-                Json.Object().AddPair(Params.Names(i), Params.Values(i));
+        void CPQFetch::DoDone(CFetchHandler *AHandler, CHTTPReply *Reply) {
+
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                DeleteHandler(pHandler);
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                DeleteHandler(pHandler);
+                DoError(E);
+            };
+
+            const auto &caPayload = AHandler->Payload();
+
+            const auto &caHeaders = HeadersToJson(Reply->Headers).ToString();
+            const auto &caContent = Reply->Content;
+
+            const auto &caRequest = caPayload["id"].AsString();
+            const auto &caDone = caPayload["done"];
+
+            CStringList SQL;
+
+            SQL.Add(CString()
+                            .MaxFormatSize(256 + caRequest.Size() + caHeaders.Size() + caContent.Size())
+                            .Format("SELECT CreateResponse(%s::uuid, %d, %s, %s::jsonb, %s);",
+                                    PQQuoteLiteral(caRequest).c_str(),
+                                    (int) Reply->Status,
+                                    PQQuoteLiteral(Reply->StatusText).c_str(),
+                                    PQQuoteLiteral(caHeaders).c_str(),
+                                    PQQuoteLiteral(caContent).c_str()
+                            ));
+
+            if (!caDone.IsNull()) {
+                SQL.Add(CString().Format("SELECT %s(%s);", caDone.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
             }
-            return Json;
+
+            try {
+                ExecSQL(SQL, AHandler, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CJSON CPQFetch::HeadersToJson(const CHeaders &Headers) {
-            CJSON Json;
-            for (int i = 0; i < Headers.Count(); i++) {
-                const auto &caHeader = Headers[i];
-                Json.Object().AddPair(caHeader.Name(), caHeader.Value());
+        void CPQFetch::DoFail(CFetchHandler *AHandler, const CString &Message) {
+
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                DeleteHandler(pHandler);
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                DeleteHandler(pHandler);
+                DoError(E);
+            };
+
+            const auto &caPayload = AHandler->Payload();
+            const auto &caRequest = caPayload["id"].AsString();
+            const auto &caFail = caPayload["fail"];
+
+            CStringList SQL;
+
+            SQL.Add(CString()
+                            .MaxFormatSize(256 + caRequest.Size() + Message.Size())
+                            .Format("UPDATE http.request SET state = 3, error = %s WHERE id = %s;",
+                                    PQQuoteLiteral(Message).c_str(),
+                                    PQQuoteLiteral(caRequest).c_str()
+                            ));
+
+            if (!caFail.IsNull()) {
+                SQL.Add(CString().Format("SELECT %s(%s);", caFail.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
             }
-            return Json;
+
+            try {
+                ExecSQL(SQL, AHandler, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DoFetch(CFetchHandler *AHandler) {
+
+            auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+
+                const auto &caPayload = AHandler->Payload();
+
+                const auto &method = caPayload["method"].AsString();
+
+                const auto &caContentType = caPayload["headers"]["Content-Type"];
+                const auto &caAuthorization = caPayload["headers"]["Authorization"];
+                const auto &caContent = caPayload["content"];
+
+                if (!caContent.IsNull()) {
+                    ARequest->Content = caContent.AsString();
+                }
+
+                CLocation URI(caPayload["resource"].AsString());
+
+                CHTTPRequest::Prepare(ARequest, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
+
+                if (!caAuthorization.IsNull()) {
+                    ARequest->AddHeader(_T("Authorization"), caAuthorization.AsString());
+                }
+
+                DebugRequest(ARequest);
+            };
+            //----------------------------------------------------------------------------------------------------------
+
+            auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pReply = pConnection->Reply();
+
+                DoDone(AHandler, pReply);
+                DebugReply(pReply);
+
+                return true;
+            };
+            //----------------------------------------------------------------------------------------------------------
+
+            auto OnException = [this, AHandler](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+
+                DoFail(AHandler, E.what());
+                DebugReply(pConnection->Reply());
+                DoError(E);
+            };
+            //----------------------------------------------------------------------------------------------------------
+
+            const auto &caPayload = AHandler->Payload();
+
+            CLocation URI(caPayload["resource"].AsString());
+
+            auto pClient = GetClient(URI.hostname, URI.port);
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+            pClient->OnConnected([this](auto &&Sender) { DoConnected(Sender); });
+            pClient->OnDisconnected([this](auto &&Sender) { DoDisconnected(Sender); });
+#else
+            pClient->OnConnected(std::bind(&DoFetch::DoConnected, this, _1));
+            pClient->OnDisconnected(std::bind(&DoFetch::DoDisconnected, this, _1));
+#endif
+
+            pClient->OnRequest(OnRequest);
+            pClient->OnExecute(OnExecute);
+            pClient->OnException(OnException);
+
+            pClient->Active(true);
+
+            AHandler->Allow(false);
+            IncProgress();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -262,8 +513,99 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::Heartbeat() {
+        void CPQFetch::InitListen() {
 
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+                try {
+                    auto pResult = APollQuery->Results(0);
+
+                    if (pResult->ExecStatus() != PGRES_COMMAND_OK) {
+                        throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
+                    }
+
+                    APollQuery->Connection()->Listener(true);
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+                    APollQuery->Connection()->OnNotify([this](auto && APollQuery, auto && ANotify) { DoPostgresNotify(APollQuery, ANotify); });
+#else
+                    APollQuery->Connection()->OnNotify(std::bind(&CReplicationServer::DoPostgresNotify, this, _1, _2));
+#endif
+                } catch (Delphi::Exception::Exception &E) {
+                    DoError(E);
+                }
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                DoError(E);
+            };
+
+            CStringList SQL;
+
+            SQL.Add("LISTEN http;");
+
+            try {
+                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::CheckListen() {
+            int index = 0;
+            while (index < PQClient().PollManager().Count() && !PQClient().Connections(index)->Listener())
+                index++;
+
+            if (index == PQClient().PollManager().Count())
+                InitListen();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::DeleteHandler(CFetchHandler *AHandler) {
+            delete AHandler;
+            DecProgress();
+            UnloadQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        int CPQFetch::AddToQueue(CFetchHandler *AHandler) {
+            return m_Queue.AddToQueue(this, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::InsertToQueue(int Index, CFetchHandler *AHandler) {
+            m_Queue.InsertToQueue(this, Index, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::RemoveFromQueue(CFetchHandler *AHandler) {
+            m_Queue.RemoveFromQueue(this, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::UnloadQueue() {
+            const auto index = m_Queue.IndexOf(this);
+            if (index != -1) {
+                const auto queue = m_Queue[index];
+                for (int i = 0; i < queue->Count(); ++i) {
+                    auto pHandler = (CFetchHandler *) queue->Item(i);
+                    if (pHandler != nullptr) {
+                        pHandler->Handler();
+                        if (m_Progress >= m_MaxQueue)
+                            break;
+                    }
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPQFetch::Heartbeat() {
+            CApostolModule::Heartbeat();
+            const auto now = Now();
+            if ((now >= m_CheckDate)) {
+                m_CheckDate = now + (CDateTime) 5 / MinsPerDay; // 5 min
+                CheckListen();
+            }
+            UnloadQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
