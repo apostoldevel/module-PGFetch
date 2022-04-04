@@ -1,10 +1,10 @@
 Postgres Fetch
 -
-**PQFetch** - модуль для [Апостол](https://github.com/apostoldevel/apostol).
+**PGFetch** - модуль для [Апостол](https://github.com/apostoldevel/apostol).
 
 Описание
 -
-**PQFetch** предоставляет возможность принимать и отправлять HTTP-запросы на языке программирования PL/pgSQL.
+**PGFetch** предоставляет возможность принимать и отправлять HTTP-запросы на языке программирования PL/pgSQL.
 
 Входящие запросы
 -

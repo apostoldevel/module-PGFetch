@@ -6,11 +6,11 @@ Program name:
 
 Module Name:
 
-  PQFetch.cpp
+  PGFetch.cpp
 
 Notices:
 
-  Module: Postgres Query Fetch
+  Module: Postgres Fetch
 
 Author:
 
@@ -24,7 +24,7 @@ Author:
 //----------------------------------------------------------------------------------------------------------------------
 
 #include "Core.hpp"
-#include "PQFetch.hpp"
+#include "PGFetch.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
 extern "C++" {
@@ -33,7 +33,7 @@ namespace Apostol {
 
     namespace Workers {
 
-        CFetchHandler::CFetchHandler(CPQFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
+        CFetchHandler::CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
                 CPollConnection(AModule->ptrQueueManager()), m_Allow(true) {
 
             m_pModule = AModule;
@@ -75,22 +75,22 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        //-- CPQFetch -------------------------------------------------------------------------------------------------
+        //-- CPGFetch -------------------------------------------------------------------------------------------------
 
         //--------------------------------------------------------------------------------------------------------------
 
-        CPQFetch::CPQFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pq fetch", "worker/PQFetch") {
+        CPGFetch::CPGFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pg fetch", "worker/PGFetch") {
             m_Headers.Add("Authorization");
 
             m_CheckDate = 0;
             m_Progress = 0;
             m_MaxQueue = Config()->PostgresPollMin();
 
-            CPQFetch::InitMethods();
+            CPGFetch::InitMethods();
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::InitMethods() {
+        void CPGFetch::InitMethods() {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
             m_pMethods->AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoGet(Connection); }));
             m_pMethods->AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoPost(Connection); }));
@@ -102,26 +102,26 @@ namespace Apostol {
             m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
             m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
 #else
-            m_pMethods->AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , std::bind(&CPQFetch::DoGet, this, _1)));
-            m_pMethods->AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , std::bind(&CPQFetch::DoPost, this, _1)));
-            m_pMethods->AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , std::bind(&CPQFetch::DoOptions, this, _1)));
-            m_pMethods->AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, std::bind(&CPQFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoGet, this, _1)));
+            m_pMethods->AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoPost, this, _1)));
+            m_pMethods->AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoOptions, this, _1)));
+            m_pMethods->AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
 #endif
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::QueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+        void CPGFetch::QueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
             auto pConnection = dynamic_cast<CHTTPServerConnection *> (APollQuery->Binding());
             ReplyError(pConnection, CHTTPReply::internal_server_error, E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CJSON CPQFetch::ParamsToJson(const CStringList &Params) {
+        CJSON CPGFetch::ParamsToJson(const CStringList &Params) {
             CJSON Json;
             for (int i = 0; i < Params.Count(); i++) {
                 Json.Object().AddPair(Params.Names(i), Params.Values(i));
@@ -130,7 +130,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CJSON CPQFetch::HeadersToJson(const CHeaders &Headers) {
+        CJSON CPGFetch::HeadersToJson(const CHeaders &Headers) {
             CJSON Json;
             for (int i = 0; i < Headers.Count(); i++) {
                 const auto &caHeader = Headers[i];
@@ -140,12 +140,12 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoError(const Delphi::Exception::Exception &E) {
-            Log()->Error(APP_LOG_ERR, 0, "[PQFetch] Error: %s", E.what());
+        void CPGFetch::DoError(const Delphi::Exception::Exception &E) {
+            Log()->Error(APP_LOG_ERR, 0, "[PGFetch] Error: %s", E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoConnected(CObject *Sender) {
+        void CPGFetch::DoConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
                 auto pSocket = pConnection->Socket();
@@ -159,7 +159,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoDisconnected(CObject *Sender) {
+        void CPGFetch::DoDisconnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
                 auto pSocket = pConnection->Socket();
@@ -175,7 +175,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
+        void CPGFetch::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
 #ifdef _DEBUG
             const auto &connInfo = AConnection->ConnInfo();
 
@@ -186,13 +186,13 @@ namespace Apostol {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
             new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoFetch(Handler); });
 #else
-            new CFetchHandler(this, ANotify->extra, std::bind(&CPQFetch::DoFetch, this, _1));
+            new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoFetch, this, _1));
 #endif
             UnloadQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
+        void CPGFetch::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
 
             auto pResult = APollQuery->Results(0);
 
@@ -253,12 +253,12 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+        void CPGFetch::DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
             QueryException(APollQuery, E);
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoDone(CFetchHandler *AHandler, CHTTPReply *Reply) {
+        void CPGFetch::DoDone(CFetchHandler *AHandler, CHTTPReply *Reply) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
@@ -303,7 +303,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoFail(CFetchHandler *AHandler, const CString &Message) {
+        void CPGFetch::DoFail(CFetchHandler *AHandler, const CString &Message) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
@@ -341,7 +341,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoFetch(CFetchHandler *AHandler) {
+        void CPGFetch::DoFetch(CFetchHandler *AHandler) {
 
             auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest *ARequest) {
 
@@ -413,7 +413,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::PQGet(CHTTPServerConnection *AConnection, const CString &Path) {
+        void CPGFetch::PQGet(CHTTPServerConnection *AConnection, const CString &Path) {
 
             auto pRequest = AConnection->Request();
 
@@ -439,7 +439,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::PQPost(CHTTPServerConnection *AConnection, const CString &Path, const CString &Body) {
+        void CPGFetch::PQPost(CHTTPServerConnection *AConnection, const CString &Path, const CString &Body) {
 
             auto pRequest = AConnection->Request();
 
@@ -467,7 +467,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoGet(CHTTPServerConnection *AConnection) {
+        void CPGFetch::DoGet(CHTTPServerConnection *AConnection) {
 
             auto pRequest = AConnection->Request();
             auto pReply = AConnection->Reply();
@@ -485,7 +485,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DoPost(CHTTPServerConnection *AConnection) {
+        void CPGFetch::DoPost(CHTTPServerConnection *AConnection) {
 
             auto pRequest = AConnection->Request();
             auto pReply = AConnection->Reply();
@@ -513,7 +513,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::InitListen() {
+        void CPGFetch::InitListen() {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 try {
@@ -550,7 +550,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::CheckListen() {
+        void CPGFetch::CheckListen() {
             int index = 0;
             while (index < PQClient().PollManager().Count() && !PQClient().Connections(index)->Listener())
                 index++;
@@ -560,29 +560,29 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::DeleteHandler(CFetchHandler *AHandler) {
+        void CPGFetch::DeleteHandler(CFetchHandler *AHandler) {
             delete AHandler;
             DecProgress();
             UnloadQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        int CPQFetch::AddToQueue(CFetchHandler *AHandler) {
+        int CPGFetch::AddToQueue(CFetchHandler *AHandler) {
             return m_Queue.AddToQueue(this, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::InsertToQueue(int Index, CFetchHandler *AHandler) {
+        void CPGFetch::InsertToQueue(int Index, CFetchHandler *AHandler) {
             m_Queue.InsertToQueue(this, Index, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::RemoveFromQueue(CFetchHandler *AHandler) {
+        void CPGFetch::RemoveFromQueue(CFetchHandler *AHandler) {
             m_Queue.RemoveFromQueue(this, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::UnloadQueue() {
+        void CPGFetch::UnloadQueue() {
             const auto index = m_Queue.IndexOf(this);
             if (index != -1) {
                 const auto queue = m_Queue[index];
@@ -598,7 +598,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPQFetch::Heartbeat() {
+        void CPGFetch::Heartbeat() {
             CApostolModule::Heartbeat();
             const auto now = Now();
             if ((now >= m_CheckDate)) {
@@ -609,14 +609,14 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        bool CPQFetch::Enabled() {
+        bool CPGFetch::Enabled() {
             if (m_ModuleStatus == msUnknown)
                 m_ModuleStatus = Config()->IniFile().ReadBool(SectionName(), "enable", true) ? msEnabled : msDisabled;
             return m_ModuleStatus == msEnabled;
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        bool CPQFetch::CheckLocation(const CLocation &Location) {
+        bool CPGFetch::CheckLocation(const CLocation &Location) {
             return Location.pathname.SubString(0, 5) == _T("/api/");
         }
         //--------------------------------------------------------------------------------------------------------------

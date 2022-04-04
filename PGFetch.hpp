@@ -6,11 +6,11 @@ Program name:
 
 Module Name:
 
-  PQFetch.hpp
+  PGFetch.hpp
 
 Notices:
 
-  Module: Postgres Query Fetch
+  Module: Postgres Fetch
 
 Author:
 
@@ -31,7 +31,7 @@ namespace Apostol {
 
     namespace Workers {
 
-        class CPQFetch;
+        class CPGFetch;
         class CFetchHandler;
         //--------------------------------------------------------------------------------------------------------------
 
@@ -41,7 +41,7 @@ namespace Apostol {
         class CFetchHandler: public CPollConnection {
         private:
 
-            CPQFetch *m_pModule;
+            CPGFetch *m_pModule;
 
             bool m_Allow;
 
@@ -58,7 +58,7 @@ namespace Apostol {
 
         public:
 
-            CFetchHandler(CPQFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler);
+            CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler);
 
             ~CFetchHandler() override;
 
@@ -75,14 +75,14 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        //-- CPQFetch --------------------------------------------------------------------------------------------------
+        //-- CPGFetch --------------------------------------------------------------------------------------------------
 
         //--------------------------------------------------------------------------------------------------------------
 
         typedef CPollManager CQueueManager;
         //--------------------------------------------------------------------------------------------------------------
 
-        class CPQFetch: public CApostolModule {
+        class CPGFetch: public CApostolModule {
         private:
 
             CQueue m_Queue;
@@ -128,12 +128,12 @@ namespace Apostol {
 
         public:
 
-            explicit CPQFetch(CModuleProcess *AProcess);
+            explicit CPGFetch(CModuleProcess *AProcess);
 
-            ~CPQFetch() override = default;
+            ~CPGFetch() override = default;
 
-            static class CPQFetch *CreateModule(CModuleProcess *AProcess) {
-                return new CPQFetch(AProcess);
+            static class CPGFetch *CreateModule(CModuleProcess *AProcess) {
+                return new CPGFetch(AProcess);
             }
 
             void PQGet(CHTTPServerConnection *AConnection, const CString &Path);
