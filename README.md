@@ -4,12 +4,94 @@ Postgres Query Fetch
 
 Описание
 -
-
 **PQFetch** Предоставляет возможность проектировать бизнес логику серверного приложения (backend) на языке программирования PL/pqSQL непосредственно в самой базе данных.
 
-Модуль направляет HTTP `GET` и `POST` запросы в базу данных PostgreSQL вызывая функции `http.get` и `http.post` соответственно.
+**Основное преимущество модуля - это очень высокая скорость обработки большого количества входящих и исходящих запросов**.
 
-Основное преимущество это очень высокая скорость обработки большого количества запросов к API серверного приложения.
+Входящие запросы
+-
+
+Модуль направляет входящие HTTP `GET` и `POST` запросы в базу данных PostgreSQL вызывая для их обработки функции `http.get` и `http.post` соответственно.
+
+Входящие запросы записываются в таблицу `http.log`.
+
+Исходящие запросы
+-
+
+Модуль умеет не только принимать HTTP-запросы но и отправлять их по сигналу из базы данных.
+
+Пример:
+
+~~~postgresql
+-- Выполнить запрос к самому себе
+SELECT http.fetch('http://localhost:8080/api/v1/time');
+~~~
+
+Исходящие запросы записываются в таблицу `http.request`, результат выполнения запроса будет сохранён в таблице `http.response`.
+
+Для удобноного просмотра исходящих запросов и полученных на них ответов воспользуйтесь представлением `http.fetch`:
+
+```postgresql
+SELECT * FROM http.fetch ORDER BY start DESC; 
+```
+
+Функция `http.fetch()` асинхронная, в качестве ответа она вернёт уникальный номер исходящего запроса.
+
+Функции обратного вызова
+-
+
+В функцию `http.fetch()` можно передать имя функции обратного вызова как для обработки успешного ответа так и в случае сбоя.
+
+```postgresql
+SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done');
+
+SELECT * FROM http.fetch('http://localhost:80801/api/v1/time', fail => 'http.fail');
+
+SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => '<schema>.<function_name>');
+```
+
+Функции обратного вызова должна быть создана заранее и в качестве параметра она должна принимать уникальный номер исходящего запроса (тип `uuid`).
+
+```postgresql
+CREATE OR REPLACE FUNCTION http.done (
+  pRequest  uuid
+) RETURNS   void
+AS $$
+DECLARE
+  r         record;
+BEGIN
+  SELECT q.method, q.resource, a.status, a.status_text, a.content INTO r
+  FROM http.request q INNER JOIN http.response a ON q.id = a.request
+  WHERE q.id = pRequest;
+
+  RAISE NOTICE '% % % %', r.method, r.resource, r.status, r.status_text;
+END;
+$$ LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = http, pg_temp;
+```
+
+```postgresql
+CREATE OR REPLACE FUNCTION http.fail (
+  pRequest  uuid
+) RETURNS   void
+AS $$
+DECLARE
+  r         record;
+BEGIN
+  SELECT method, resource, error INTO r
+  FROM http.request
+  WHERE id = pRequest;
+
+  RAISE NOTICE 'ERROR: % % %', r.method, r.resource, r.error;
+END;
+$$ LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = http, pg_temp;
+) RETURNS   void
+```
+
+
 
 Установка базы данных
 -
@@ -44,7 +126,7 @@ http[s]://<hosthame>[:<port>]/api/<route>
 
 Парамерты функций
 -
-Для `GET` запроса:
+Для обработки `GET` запроса:
 ~~~postgresql
 /**
  * @param {text} path - Путь
@@ -59,7 +141,7 @@ CREATE OR REPLACE FUNCTION http.get (
 ) RETURNS   SETOF json
 ~~~ 
 
-Для `POST` запроса:
+Для обработки `POST` запроса:
 ~~~postgresql
 /**
  * @param {text} path - Путь
@@ -75,3 +157,25 @@ CREATE OR REPLACE FUNCTION http.post (
   body      jsonb DEFAULT null
 ) RETURNS   SETOF json
 ~~~ 
+
+Для отправки `GET` или `POST` запроса:
+~~~postgresql
+/**
+ * Выполняет HTTP запрос.
+ * @param {text} resource - Ресурс
+ * @param {text} method - Метод
+ * @param {jsonb} headers - HTTP заголовки
+ * @param {text} content - Содержание запроса
+ * @param {text} done - Имя функции обратного вызова в случае успешного ответа
+ * @param {text} fail - Имя функции обратного вызова в случае сбоя
+ * @return {uuid}
+ */
+CREATE OR REPLACE FUNCTION http.fetch (
+  resource  text,
+  method    text DEFAULT 'GET',
+  headers   jsonb DEFAULT null,
+  content   text DEFAULT null,
+  done      text DEFAULT null,
+  fail      text DEFAULT null
+) RETURNS   uuid
+~~~
