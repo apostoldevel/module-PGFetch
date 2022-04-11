@@ -398,8 +398,8 @@ namespace Apostol {
             pClient->OnConnected([this](auto &&Sender) { DoConnected(Sender); });
             pClient->OnDisconnected([this](auto &&Sender) { DoDisconnected(Sender); });
 #else
-            pClient->OnConnected(std::bind(&DoFetch::DoConnected, this, _1));
-            pClient->OnDisconnected(std::bind(&DoFetch::DoDisconnected, this, _1));
+            pClient->OnConnected(std::bind(&CPGFetch::DoConnected, this, _1));
+            pClient->OnDisconnected(std::bind(&CPGFetch::DoDisconnected, this, _1));
 #endif
 
             pClient->OnRequest(OnRequest);
@@ -527,7 +527,7 @@ namespace Apostol {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                     APollQuery->Connection()->OnNotify([this](auto && APollQuery, auto && ANotify) { DoPostgresNotify(APollQuery, ANotify); });
 #else
-                    APollQuery->Connection()->OnNotify(std::bind(&CReplicationServer::DoPostgresNotify, this, _1, _2));
+                    APollQuery->Connection()->OnNotify(std::bind(&CPGFetch::DoPostgresNotify, this, _1, _2));
 #endif
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
