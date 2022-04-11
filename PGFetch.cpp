@@ -283,7 +283,7 @@ namespace Apostol {
 
             SQL.Add(CString()
                             .MaxFormatSize(256 + caRequest.Size() + caHeaders.Size() + caContent.Size())
-                            .Format("SELECT CreateResponse(%s::uuid, %d, %s, %s::jsonb, %s);",
+                            .Format("SELECT http.create_response(%s::uuid, %d, %s, %s::jsonb, %s);",
                                     PQQuoteLiteral(caRequest).c_str(),
                                     (int) Reply->Status,
                                     PQQuoteLiteral(Reply->StatusText).c_str(),
