@@ -139,7 +139,7 @@ namespace Apostol {
             void PQGet(CHTTPServerConnection *AConnection, const CString &Path);
             void PQPost(CHTTPServerConnection *AConnection, const CString &Path, const CString &Body);
 
-            void Heartbeat() override;
+            void Heartbeat(CDateTime DateTime) override;
 
             bool Enabled() override;
 

@@ -27,6 +27,9 @@ Author:
 #include "PGFetch.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
+#define PG_LISTEN_NAME "http"
+//----------------------------------------------------------------------------------------------------------------------
+
 extern "C++" {
 
 namespace Apostol {
@@ -176,19 +179,16 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CPGFetch::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
-#ifdef _DEBUG
-            const auto &connInfo = AConnection->ConnInfo();
+            DebugNotify(AConnection, ANotify);
 
-            DebugMessage("[NOTIFY] [%d] [postgresql://%s@%s:%s/%s] [PID: %d] [%s] %s\n",
-                         AConnection->Socket(), connInfo["user"].c_str(), connInfo["host"].c_str(), connInfo["port"].c_str(),
-                         connInfo["dbname"].c_str(), ANotify->be_pid, ANotify->relname, ANotify->extra);
-#endif
+            if (CompareString(ANotify->relname, PG_LISTEN_NAME) == 0) {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoFetch(Handler); });
+                new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoFetch(Handler); });
 #else
-            new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoFetch, this, _1));
+                new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoFetch, this, _1));
 #endif
-            UnloadQueue();
+                UnloadQueue();
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -523,7 +523,7 @@ namespace Apostol {
                         throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
                     }
 
-                    APollQuery->Connection()->Listener(true);
+                    APollQuery->Connection()->Listeners().Add(PG_LISTEN_NAME);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                     APollQuery->Connection()->OnNotify([this](auto && APollQuery, auto && ANotify) { DoPostgresNotify(APollQuery, ANotify); });
 #else
@@ -540,7 +540,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            SQL.Add("LISTEN http;");
+            SQL.Add("LISTEN " PG_LISTEN_NAME ";");
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
@@ -551,11 +551,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CPGFetch::CheckListen() {
-            int index = 0;
-            while (index < PQClient().PollManager().Count() && !PQClient().Connections(index)->Listener())
-                index++;
-
-            if (index == PQClient().PollManager().Count())
+            if (!PQClient().CheckListen(PG_LISTEN_NAME))
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -598,11 +594,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::Heartbeat() {
-            CApostolModule::Heartbeat();
-            const auto now = Now();
-            if ((now >= m_CheckDate)) {
-                m_CheckDate = now + (CDateTime) 5 / MinsPerDay; // 5 min
+        void CPGFetch::Heartbeat(CDateTime DateTime) {
+            CApostolModule::Heartbeat(DateTime);
+            if ((DateTime >= m_CheckDate)) {
+                m_CheckDate = DateTime + (CDateTime) 1 / MinsPerDay; // 1 min
                 CheckListen();
             }
             UnloadQueue();
