@@ -34,7 +34,7 @@ extern "C++" {
 
 namespace Apostol {
 
-    namespace Workers {
+    namespace Module {
 
         CFetchHandler::CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
                 CPollConnection(AModule->ptrQueueManager()), m_Allow(true) {
@@ -82,7 +82,7 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        CPGFetch::CPGFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pg fetch", "worker/PGFetch") {
+        CPGFetch::CPGFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pg fetch", "module/PGFetch") {
             m_Headers.Add("Authorization");
 
             m_CheckDate = 0;
