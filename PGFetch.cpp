@@ -324,9 +324,9 @@ namespace Apostol {
 
             SQL.Add(CString()
                             .MaxFormatSize(256 + caRequest.Size() + Message.Size())
-                            .Format("UPDATE http.request SET state = 3, error = %s WHERE id = %s;",
-                                    PQQuoteLiteral(Message).c_str(),
-                                    PQQuoteLiteral(caRequest).c_str()
+                            .Format("SELECT http.fail(%s, %s);",
+                                    PQQuoteLiteral(caRequest).c_str(),
+                                    PQQuoteLiteral(Message).c_str()
                             ));
 
             if (!caFail.IsNull()) {
@@ -406,10 +406,13 @@ namespace Apostol {
             pClient->OnExecute(OnExecute);
             pClient->OnException(OnException);
 
-            pClient->Active(true);
-
-            AHandler->Allow(false);
-            IncProgress();
+            try {
+                pClient->Active(true);
+                AHandler->Allow(false);
+                IncProgress();
+            } catch (std::exception &e) {
+                DoFail(AHandler, e.what());
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
