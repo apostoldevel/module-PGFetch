@@ -39,6 +39,9 @@ namespace Apostol {
         CFetchHandler::CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
                 CPollConnection(AModule->ptrQueueManager()), m_Allow(true) {
 
+            m_TimeOut = 0;
+            m_TimeOutInterval = 15000;
+
             m_pModule = AModule;
             m_Payload = Data;
             m_Handler = Handler;
@@ -292,12 +295,13 @@ namespace Apostol {
                             ));
 
             if (!caDone.IsNull()) {
-                SQL.Add(CString().Format("SELECT %s(%s);", caDone.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
+                SQL.Add(CString().Format("SELECT %s(%s::uuid);", caDone.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
             }
 
             try {
                 ExecSQL(SQL, AHandler, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
+                DeleteHandler(AHandler);
                 DoError(E);
             }
         }
@@ -324,18 +328,19 @@ namespace Apostol {
 
             SQL.Add(CString()
                             .MaxFormatSize(256 + caRequest.Size() + Message.Size())
-                            .Format("SELECT http.fail(%s, %s);",
+                            .Format("SELECT http.fail(%s::uuid, %s);",
                                     PQQuoteLiteral(caRequest).c_str(),
                                     PQQuoteLiteral(Message).c_str()
                             ));
 
             if (!caFail.IsNull()) {
-                SQL.Add(CString().Format("SELECT %s(%s);", caFail.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
+                SQL.Add(CString().Format("SELECT %s(%s::uuid);", caFail.AsString().c_str(), PQQuoteLiteral(caRequest).c_str()));
             }
 
             try {
                 ExecSQL(SQL, AHandler, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
+                DeleteHandler(AHandler);
                 DoError(E);
             }
         }
@@ -408,7 +413,10 @@ namespace Apostol {
 
             try {
                 pClient->Active(true);
+
                 AHandler->Allow(false);
+                AHandler->UpdateTimeOut(Now());
+
                 IncProgress();
             } catch (std::exception &e) {
                 DoFail(AHandler, e.what());
@@ -561,7 +569,8 @@ namespace Apostol {
 
         void CPGFetch::DeleteHandler(CFetchHandler *AHandler) {
             delete AHandler;
-            DecProgress();
+            if (m_Progress > 0)
+                DecProgress();
             UnloadQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -597,13 +606,30 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CPGFetch::CheckTimeOut(CDateTime Now) {
+            const auto index = m_Queue.IndexOf(this);
+            if (index != -1) {
+                const auto queue = m_Queue[index];
+                for (int i = queue->Count() - 1; i >= 0; i--) {
+                    auto pHandler = (CFetchHandler *) queue->Item(i);
+                    if (pHandler != nullptr) {
+                        if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
+                            DoFail(pHandler, "Time out");
+                        }
+                    }
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CPGFetch::Heartbeat(CDateTime DateTime) {
             CApostolModule::Heartbeat(DateTime);
-            if ((DateTime >= m_CheckDate)) {
+            if (DateTime >= m_CheckDate) {
                 m_CheckDate = DateTime + (CDateTime) 1 / MinsPerDay; // 1 min
                 CheckListen();
             }
             UnloadQueue();
+            CheckTimeOut(DateTime);
         }
         //--------------------------------------------------------------------------------------------------------------
 

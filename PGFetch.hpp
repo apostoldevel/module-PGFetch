@@ -97,6 +97,7 @@ namespace Apostol {
             void CheckListen();
 
             void UnloadQueue();
+            void CheckTimeOut(CDateTime Now);
 
             void DeleteHandler(CFetchHandler *AHandler);
 
