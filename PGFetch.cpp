@@ -614,7 +614,7 @@ namespace Apostol {
                     auto pHandler = (CFetchHandler *) queue->Item(i);
                     if (pHandler != nullptr) {
                         if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
-                            DoFail(pHandler, "Time out");
+                            DoFail(pHandler, "Connection timed out.");
                         }
                     }
                 }
