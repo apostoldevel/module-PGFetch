@@ -42,6 +42,7 @@ namespace Apostol {
             m_TimeOut = 0;
             m_TimeOutInterval = 15000;
 
+            m_pClient = nullptr;
             m_pModule = AModule;
             m_Payload = Data;
             m_Handler = Handler;
@@ -52,12 +53,18 @@ namespace Apostol {
 
         CFetchHandler::~CFetchHandler() {
             RemoveFromQueue();
+            FreeClient();
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CFetchHandler::Close() {
             m_Allow = false;
             RemoveFromQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CFetchHandler::FreeClient() {
+            FreeAndNil(m_pClient);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -414,6 +421,7 @@ namespace Apostol {
             try {
                 pClient->Active(true);
 
+                AHandler->Client(pClient);
                 AHandler->Allow(false);
                 AHandler->UpdateTimeOut(Now());
 
@@ -614,7 +622,7 @@ namespace Apostol {
                     auto pHandler = (CFetchHandler *) pQueue->Item(i);
                     if (pHandler != nullptr) {
                         if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
-                            DoFail(pHandler, "Connection timed out.");
+                            DoFail(pHandler, "Connection timed out");
                         }
                     }
                 }
