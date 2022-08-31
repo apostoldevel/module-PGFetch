@@ -158,7 +158,7 @@ namespace Apostol {
                 if (pSocket != nullptr) {
                     auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
-                        Log()->Notice(_T("[%s:%d] Fetch client connected."), pHandle->PeerIP(), pHandle->PeerPort());
+                        Log()->Notice(_T("[PGFetch] [%s:%d] Client connected."), pHandle->PeerIP(), pHandle->PeerPort());
                     }
                 }
             }
@@ -172,10 +172,10 @@ namespace Apostol {
                 if (pSocket != nullptr) {
                     auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
-                        Log()->Notice(_T("[%s:%d] Fetch client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
+                        Log()->Notice(_T("[PGFetch] [%s:%d] Client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
                     }
                 } else {
-                    Log()->Notice(_T("Fetch client disconnected."));
+                    Log()->Notice(_T("[PGFetch] Client disconnected."));
                 }
             }
         }
@@ -545,7 +545,7 @@ namespace Apostol {
                 }
             };
 
-            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+            auto OnException = [](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 DoError(E);
             };
 
@@ -593,9 +593,9 @@ namespace Apostol {
         void CPGFetch::UnloadQueue() {
             const auto index = m_Queue.IndexOf(this);
             if (index != -1) {
-                const auto queue = m_Queue[index];
-                for (int i = 0; i < queue->Count(); ++i) {
-                    auto pHandler = (CFetchHandler *) queue->Item(i);
+                const auto pQueue = m_Queue[index];
+                for (int i = 0; i < pQueue->Count(); ++i) {
+                    auto pHandler = (CFetchHandler *) pQueue->Item(i);
                     if (pHandler != nullptr) {
                         pHandler->Handler();
                         if (m_Progress >= m_MaxQueue)
@@ -609,9 +609,9 @@ namespace Apostol {
         void CPGFetch::CheckTimeOut(CDateTime Now) {
             const auto index = m_Queue.IndexOf(this);
             if (index != -1) {
-                const auto queue = m_Queue[index];
-                for (int i = queue->Count() - 1; i >= 0; i--) {
-                    auto pHandler = (CFetchHandler *) queue->Item(i);
+                const auto pQueue = m_Queue[index];
+                for (int i = pQueue->Count() - 1; i >= 0; i--) {
+                    auto pHandler = (CFetchHandler *) pQueue->Item(i);
                     if (pHandler != nullptr) {
                         if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
                             DoFail(pHandler, "Connection timed out.");
