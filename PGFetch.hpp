@@ -42,7 +42,6 @@ namespace Apostol {
         private:
 
             CPGFetch *m_pModule;
-            CAsyncClient *m_pClient;
 
             bool m_Allow;
 
@@ -53,12 +52,9 @@ namespace Apostol {
             int AddToQueue();
             void RemoveFromQueue();
 
-            void FreeClient();
-
         protected:
 
             void SetAllow(bool Value) { m_Allow = Value; }
-            void SetClient(CAsyncClient *Value) { m_pClient = Value; }
 
         public:
 
@@ -70,9 +66,6 @@ namespace Apostol {
 
             bool Allow() const { return m_Allow; };
             void Allow(bool Value) { SetAllow(Value); };
-
-            CAsyncClient *Client() const { return m_pClient; };
-            void Client(CAsyncClient *Value) { SetClient(Value); };
 
             bool Handler();
 

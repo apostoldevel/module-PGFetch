@@ -42,7 +42,6 @@ namespace Apostol {
             m_TimeOut = 0;
             m_TimeOutInterval = 15000;
 
-            m_pClient = nullptr;
             m_pModule = AModule;
             m_Payload = Data;
             m_Handler = Handler;
@@ -53,18 +52,12 @@ namespace Apostol {
 
         CFetchHandler::~CFetchHandler() {
             RemoveFromQueue();
-            FreeClient();
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CFetchHandler::Close() {
             m_Allow = false;
             RemoveFromQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchHandler::FreeClient() {
-            FreeAndNil(m_pClient);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -419,9 +412,9 @@ namespace Apostol {
             pClient->OnException(OnException);
 
             try {
+                pClient->AutoFree(true);
                 pClient->Active(true);
 
-                AHandler->Client(pClient);
                 AHandler->Allow(false);
                 AHandler->UpdateTimeOut(Now());
 
