@@ -127,6 +127,66 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        int CPGFetch::CheckError(const CJSON &Json, CString &ErrorMessage) {
+            int errorCode = 0;
+
+            if (Json.HasOwnProperty(_T("error"))) {
+                const auto& error = Json[_T("error")];
+
+                if (error.HasOwnProperty(_T("code"))) {
+                    errorCode = error[_T("code")].AsInteger();
+                } else {
+                    return 0;
+                }
+
+                if (error.HasOwnProperty(_T("message"))) {
+                    ErrorMessage = error[_T("message")].AsString();
+                } else {
+                    return 0;
+                }
+
+                if (errorCode >= 10000)
+                    errorCode = errorCode / 100;
+
+                if (errorCode < 0)
+                    errorCode = 400;
+            }
+
+            return errorCode;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        CHTTPReply::CStatusType CPGFetch::ErrorCodeToStatus(int ErrorCode) {
+            CHTTPReply::CStatusType status = CHTTPReply::ok;
+
+            if (ErrorCode != 0) {
+                switch (ErrorCode) {
+                    case 401:
+                        status = CHTTPReply::unauthorized;
+                        break;
+
+                    case 403:
+                        status = CHTTPReply::forbidden;
+                        break;
+
+                    case 404:
+                        status = CHTTPReply::not_found;
+                        break;
+
+                    case 500:
+                        status = CHTTPReply::internal_server_error;
+                        break;
+
+                    default:
+                        status = CHTTPReply::bad_request;
+                        break;
+                }
+            }
+
+            return status;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         CJSON CPGFetch::ParamsToJson(const CStringList &Params) {
             CJSON Json;
             for (int i = 0; i < Params.Count(); i++) {
@@ -237,7 +297,18 @@ namespace Apostol {
                     CHTTPReply::CStatusType status = CHTTPReply::ok;
 
                     try {
+                        if (pResult->nTuples() == 1) {
+                            const CJSON Payload(pResult->GetValue(0, 0));
+                            status = ErrorCodeToStatus(CheckError(Payload, errorMessage));
+                        }
+
                         PQResultToJson(pResult, pReply->Content, result_format, result_object == "true" ? "result" : CString());
+
+                        if (status == CHTTPReply::ok) {
+                            pConnection->SendReply(status, nullptr, true);
+                        } else {
+                            ReplyError(pConnection, status, errorMessage);
+                        }
                     } catch (Delphi::Exception::Exception &E) {
                         errorMessage = E.what();
                         status = CHTTPReply::bad_request;

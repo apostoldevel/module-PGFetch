@@ -108,6 +108,9 @@ namespace Apostol {
 
             static void QueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E);
 
+            static int CheckError(const CJSON &Json, CString &ErrorMessage);
+            static CHTTPReply::CStatusType ErrorCodeToStatus(int ErrorCode);
+
         protected:
 
             static void DoError(const Delphi::Exception::Exception &E);
