@@ -642,7 +642,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         bool CPGFetch::CheckLocation(const CLocation &Location) {
-            return Location.pathname.SubString(0, 5) == _T("/api/");
+            return CApostolModule::CheckLocation(Location);
         }
         //--------------------------------------------------------------------------------------------------------------
     }
