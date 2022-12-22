@@ -36,47 +36,13 @@ namespace Apostol {
 
     namespace Module {
 
-        CFetchHandler::CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler):
-                CPollConnection(AModule->ptrQueueManager()), m_Allow(true) {
+        CFetchHandler::CFetchHandler(CQueueCollection *ACollection, const CString &Payload, COnQueueHandlerEvent && Handler):
+                CQueueHandler(ACollection, static_cast<COnQueueHandlerEvent &&> (Handler)) {
 
             m_TimeOut = 0;
             m_TimeOutInterval = 15000;
 
-            m_pModule = AModule;
-            m_Payload = Data;
-            m_Handler = Handler;
-
-            AddToQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchHandler::~CFetchHandler() {
-            RemoveFromQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchHandler::Close() {
-            m_Allow = false;
-            RemoveFromQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        int CFetchHandler::AddToQueue() {
-            return m_pModule->AddToQueue(this);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchHandler::RemoveFromQueue() {
-            m_pModule->RemoveFromQueue(this);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        bool CFetchHandler::Handler() {
-            if (m_Allow && m_Handler) {
-                m_Handler(this);
-                return true;
-            }
-            return false;
+            m_Payload = Payload;
         }
 
         //--------------------------------------------------------------------------------------------------------------
@@ -85,12 +51,13 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        CPGFetch::CPGFetch(CModuleProcess *AProcess) : CApostolModule(AProcess, "pg fetch", "module/PGFetch") {
+        CPGFetch::CPGFetch(CModuleProcess *AProcess): CApostolModule(AProcess, "pg fetch", "module/PGFetch"),
+                CQueueCollection(Config()->PostgresPollMin()) {
+
             m_Headers.Add("Authorization");
 
             m_CheckDate = 0;
             m_Progress = 0;
-            m_MaxQueue = Config()->PostgresPollMin();
 
             CPGFetch::InitMethods();
         }
@@ -98,25 +65,25 @@ namespace Apostol {
 
         void CPGFetch::InitMethods() {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            m_pMethods->AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoGet(Connection); }));
-            m_pMethods->AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoPost(Connection); }));
-            m_pMethods->AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoOptions(Connection); }));
-            m_pMethods->AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
-            m_pMethods->AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
-            m_pMethods->AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
-            m_pMethods->AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
-            m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
-            m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoGet(Connection); }));
+            m_Methods.AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoPost(Connection); }));
+            m_Methods.AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , [this](auto && Connection) { DoOptions(Connection); }));
+            m_Methods.AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
+            m_Methods.AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, [this](auto && Connection) { MethodNotAllowed(Connection); }));
 #else
-            m_pMethods->AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoGet, this, _1)));
-            m_pMethods->AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoPost, this, _1)));
-            m_pMethods->AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoOptions, this, _1)));
-            m_pMethods->AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
-            m_pMethods->AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("GET")    , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoGet, this, _1)));
+            m_Methods.AddObject(_T("POST")   , (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoPost, this, _1)));
+            m_Methods.AddObject(_T("OPTIONS"), (CObject *) new CMethodHandler(true , std::bind(&CPGFetch::DoOptions, this, _1)));
+            m_Methods.AddObject(_T("HEAD")   , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("PUT")    , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("DELETE") , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("TRACE")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("PATCH")  , (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
+            m_Methods.AddObject(_T("CONNECT"), (CObject *) new CMethodHandler(false, std::bind(&CPGFetch::MethodNotAllowed, this, _1)));
 #endif
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -417,11 +384,12 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::DoFetch(CFetchHandler *AHandler) {
+        void CPGFetch::DoFetch(CQueueHandler *AHandler) {
 
             auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
-                const auto &caPayload = AHandler->Payload();
+                const auto &caPayload = pHandler->Payload();
 
                 const auto &method = caPayload["method"].AsString();
 
@@ -446,10 +414,12 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pReply = pConnection->Reply();
 
-                DoDone(AHandler, pReply);
+                DoDone(pHandler, pReply);
                 DebugReply(pReply);
 
                 return true;
@@ -457,15 +427,18 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnException = [this, AHandler](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
 
-                DoFail(AHandler, E.what());
+                DoFail(pHandler, E.what());
                 DebugReply(pConnection->Reply());
                 DoError(E);
             };
             //----------------------------------------------------------------------------------------------------------
 
-            const auto &caPayload = AHandler->Payload();
+            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
+            const auto &caPayload = pHandler->Payload();
 
             CLocation URI(caPayload["resource"].AsString());
 
@@ -491,7 +464,7 @@ namespace Apostol {
 
                 IncProgress();
             } catch (std::exception &e) {
-                DoFail(AHandler, e.what());
+                DoFail(pHandler, e.what());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -636,29 +609,6 @@ namespace Apostol {
         void CPGFetch::CheckListen() {
             if (!PQClient().CheckListen(PG_LISTEN_NAME))
                 InitListen();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DeleteHandler(CFetchHandler *AHandler) {
-            delete AHandler;
-            if (m_Progress > 0)
-                DecProgress();
-            UnloadQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        int CPGFetch::AddToQueue(CFetchHandler *AHandler) {
-            return m_Queue.AddToQueue(this, AHandler);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::InsertToQueue(int Index, CFetchHandler *AHandler) {
-            m_Queue.InsertToQueue(this, Index, AHandler);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::RemoveFromQueue(CFetchHandler *AHandler) {
-            m_Queue.RemoveFromQueue(this, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 

@@ -31,45 +31,24 @@ namespace Apostol {
 
     namespace Module {
 
-        class CPGFetch;
-        class CFetchHandler;
         //--------------------------------------------------------------------------------------------------------------
 
-        typedef std::function<void (CFetchHandler *Handler)> COnFetchHandlerEvent;
+        //-- CFetchHandler ---------------------------------------------------------------------------------------------
+
         //--------------------------------------------------------------------------------------------------------------
 
-        class CFetchHandler: public CPollConnection {
+        class CFetchHandler: public CQueueHandler {
         private:
-
-            CPGFetch *m_pModule;
-
-            bool m_Allow;
 
             CJSON m_Payload;
 
-            COnFetchHandlerEvent m_Handler;
-
-            int AddToQueue();
-            void RemoveFromQueue();
-
-        protected:
-
-            void SetAllow(bool Value) { m_Allow = Value; }
-
         public:
 
-            CFetchHandler(CPGFetch *AModule, const CString &Data, COnFetchHandlerEvent && Handler);
+            CFetchHandler(CQueueCollection *AConnection, const CString &Payload, COnQueueHandlerEvent && Handler);
 
-            ~CFetchHandler() override;
+            ~CFetchHandler() override = default;
 
             const CJSON &Payload() const { return m_Payload; }
-
-            bool Allow() const { return m_Allow; };
-            void Allow(bool Value) { SetAllow(Value); };
-
-            bool Handler();
-
-            void Close() override;
 
         };
 
@@ -79,27 +58,15 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        typedef CPollManager CQueueManager;
-        //--------------------------------------------------------------------------------------------------------------
-
-        class CPGFetch: public CApostolModule {
+        class CPGFetch: public CQueueCollection, public CApostolModule {
         private:
 
-            CQueue m_Queue;
-            CQueueManager m_QueueManager;
-
             CDateTime m_CheckDate;
-
-            size_t m_Progress;
-            size_t m_MaxQueue;
 
             void InitListen();
             void CheckListen();
 
-            void UnloadQueue();
             void CheckTimeOut(CDateTime Now);
-
-            void DeleteHandler(CFetchHandler *AHandler);
 
             static CJSON ParamsToJson(const CStringList &Params);
             static CJSON HeadersToJson(const CHeaders &Headers);
@@ -115,7 +82,7 @@ namespace Apostol {
 
             static void DoError(const Delphi::Exception::Exception &E);
 
-            void DoFetch(CFetchHandler *AHandler);
+            void DoFetch(CQueueHandler *AHandler);
             void DoDone(CFetchHandler *AHandler, CHTTPReply *Reply);
             void DoFail(CFetchHandler *AHandler, const CString &Message);
 
@@ -140,6 +107,8 @@ namespace Apostol {
                 return new CPGFetch(AProcess);
             }
 
+            void UnloadQueue() override;
+
             void PQGet(CHTTPServerConnection *AConnection, const CString &Path);
             void PQPost(CHTTPServerConnection *AConnection, const CString &Path, const CString &Body);
 
@@ -149,22 +118,8 @@ namespace Apostol {
 
             bool CheckLocation(const CLocation &Location) override;
 
-            void IncProgress() { m_Progress++; }
-            void DecProgress() { m_Progress--; }
-
-            int AddToQueue(CFetchHandler *AHandler);
-            void InsertToQueue(int Index, CFetchHandler *AHandler);
-            void RemoveFromQueue(CFetchHandler *AHandler);
-
-            CQueue &Queue() { return m_Queue; }
-            const CQueue &Queue() const { return m_Queue; }
-
-            CPollManager *ptrQueueManager() { return &m_QueueManager; }
-
-            CPollManager &QueueManager() { return m_QueueManager; }
-            const CPollManager &QueueManager() const { return m_QueueManager; }
-
         };
+
     }
 }
 
