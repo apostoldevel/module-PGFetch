@@ -40,14 +40,19 @@ namespace Apostol {
         class CFetchHandler: public CQueueHandler {
         private:
 
+            CString m_RequestId;
+
             CJSON m_Payload;
 
         public:
 
-            CFetchHandler(CQueueCollection *AConnection, const CString &Payload, COnQueueHandlerEvent && Handler);
+            CFetchHandler(CQueueCollection *AConnection, const CString &RequestId, COnQueueHandlerEvent && Handler);
 
             ~CFetchHandler() override = default;
 
+            const CString &RequestId() const { return m_RequestId; }
+
+            CJSON &Payload() { return m_Payload; }
             const CJSON &Payload() const { return m_Payload; }
 
         };
@@ -82,6 +87,7 @@ namespace Apostol {
 
             static void DoError(const Delphi::Exception::Exception &E);
 
+            void DoQuery(CQueueHandler *AHandler);
             void DoFetch(CQueueHandler *AHandler);
             void DoDone(CFetchHandler *AHandler, CHTTPReply *Reply);
             void DoFail(CFetchHandler *AHandler, const CString &Message);

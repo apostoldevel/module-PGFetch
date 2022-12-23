@@ -36,13 +36,42 @@ namespace Apostol {
 
     namespace Module {
 
-        CFetchHandler::CFetchHandler(CQueueCollection *ACollection, const CString &Payload, COnQueueHandlerEvent && Handler):
+        CString PQQuoteLiteralJson(const CString &Json) {
+
+            if (Json.IsEmpty())
+                return "null";
+
+            CString Result;
+            TCHAR ch;
+
+            Result = "E'";
+
+            for (size_t Index = 0; Index < Json.Size(); Index++) {
+                ch = Json.at(Index);
+                if (ch == '\'')
+                    Result.Append('\\');
+                Result.Append(ch);
+            }
+
+            Result << "'";
+
+            return Result;
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CFetchHandler ---------------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+
+        CFetchHandler::CFetchHandler(CQueueCollection *ACollection, const CString &RequestId, COnQueueHandlerEvent && Handler):
                 CQueueHandler(ACollection, static_cast<COnQueueHandlerEvent &&> (Handler)) {
 
             m_TimeOut = 0;
             m_TimeOutInterval = 15000;
 
-            m_Payload = Payload;
+            m_RequestId = RequestId;
         }
 
         //--------------------------------------------------------------------------------------------------------------
@@ -213,9 +242,9 @@ namespace Apostol {
 
             if (CompareString(ANotify->relname, PG_LISTEN_NAME) == 0) {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoFetch(Handler); });
+                new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoQuery(Handler); });
 #else
-                new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoFetch, this, _1));
+                new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoQuery, this, _1));
 #endif
                 UnloadQueue();
             }
@@ -312,10 +341,12 @@ namespace Apostol {
                 DoError(E);
             };
 
+            const auto& caContentType = Reply->Headers[_T("Content-Type")].Lower();
+
             const auto &caPayload = AHandler->Payload();
 
             const auto &caHeaders = HeadersToJson(Reply->Headers).ToString();
-            const auto &caContent = Reply->Content;
+            const auto &caContent = caContentType == "application/json" ? PQQuoteLiteralJson(Reply->Content) : PQQuoteLiteral(Reply->Content);
 
             const auto &caRequest = caPayload["id"].AsString();
             const auto &caDone = caPayload["done"];
@@ -329,7 +360,7 @@ namespace Apostol {
                                     (int) Reply->Status,
                                     PQQuoteLiteral(Reply->StatusText).c_str(),
                                     PQQuoteLiteral(caHeaders).c_str(),
-                                    PQQuoteLiteral(caContent).c_str()
+                                    caContent.c_str()
                             ));
 
             if (!caDone.IsNull()) {
@@ -384,6 +415,64 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CPGFetch::DoQuery(CQueueHandler *AHandler) {
+
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+
+                if (APollQuery->Count() == 0) {
+                    DeleteHandler(pHandler);
+                    return;
+                }
+
+                CPQResult *pResult;
+                try {
+                    for (int i = 0; i < APollQuery->Count(); i++) {
+                        pResult = APollQuery->Results(i);
+
+                        if (pResult->ExecStatus() != PGRES_TUPLES_OK)
+                            throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
+
+                        CString Json;
+
+                        Postgres::PQResultToJson(pResult, Json);
+                        pHandler->Payload() = Json;
+                        DoFetch(pHandler);
+                    }
+                } catch (Delphi::Exception::Exception &E) {
+                    DeleteHandler(pHandler);
+                    DoError(E);
+                }
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                DeleteHandler(pHandler);
+                DoError(E);
+            };
+
+            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
+            CStringList SQL;
+
+            SQL.Add(CString().Format("SELECT * FROM http.request WHERE id = %s::uuid;",
+                                    PQQuoteLiteral(pHandler->RequestId()).c_str()
+                            ));
+
+            try {
+                ExecSQL(SQL, AHandler, OnExecuted, OnException);
+
+                AHandler->Allow(false);
+                AHandler->UpdateTimeOut(Now());
+
+                IncProgress();
+            } catch (Delphi::Exception::Exception &E) {
+                DeleteHandler(AHandler);
+                DoError(E);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CPGFetch::DoFetch(CQueueHandler *AHandler) {
 
             auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest *ARequest) {
@@ -414,24 +503,29 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
-                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pReply = pConnection->Reply();
 
-                DoDone(pHandler, pReply);
                 DebugReply(pReply);
+
+                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+                if (Assigned(pHandler)) {
+                    DoDone(pHandler, pReply);
+                }
 
                 return true;
             };
             //----------------------------------------------------------------------------------------------------------
 
             auto OnException = [this, AHandler](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
-                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-
-                DoFail(pHandler, E.what());
                 DebugReply(pConnection->Reply());
+
+                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+                if (Assigned(pHandler)) {
+                    DoFail(pHandler, E.what());
+                }
+
                 DoError(E);
             };
             //----------------------------------------------------------------------------------------------------------
@@ -458,11 +552,6 @@ namespace Apostol {
             try {
                 pClient->AutoFree(true);
                 pClient->Active(true);
-
-                AHandler->Allow(false);
-                AHandler->UpdateTimeOut(Now());
-
-                IncProgress();
             } catch (std::exception &e) {
                 DoFail(pHandler, e.what());
             }
