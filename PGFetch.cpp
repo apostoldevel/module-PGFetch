@@ -264,8 +264,8 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPServerConnection *> (APollQuery->Binding());
 
                 if (pConnection != nullptr && !pConnection->ClosedGracefully()) {
-                    auto pRequest = pConnection->Request();
-                    auto pReply = pConnection->Reply();
+                    const auto &caRequest = pConnection->Request();
+                    auto &Reply = pConnection->Reply();
 
                     CStringList ResultObject;
                     CStringList ResultFormat;
@@ -277,8 +277,8 @@ namespace Apostol {
                     ResultFormat.Add("array");
                     ResultFormat.Add("null");
 
-                    const auto &result_object = pRequest->Params[_T("result_object")];
-                    const auto &result_format = pRequest->Params[_T("result_format")];
+                    const auto &result_object = caRequest.Params[_T("result_object")];
+                    const auto &result_format = caRequest.Params[_T("result_format")];
 
                     if (!result_object.IsEmpty() && ResultObject.IndexOfName(result_object) == -1) {
                         ReplyError(pConnection, CHTTPReply::bad_request, CString().Format("Invalid result_object: %s", result_object.c_str()));
@@ -298,7 +298,7 @@ namespace Apostol {
                             status = ErrorCodeToStatus(CheckError(Payload, errorMessage));
                         }
 
-                        PQResultToJson(pResult, pReply->Content, result_format, result_object == "true" ? "result" : CString());
+                        PQResultToJson(pResult, Reply.Content, result_format, result_object == "true" ? "result" : CString());
 
                         if (status == CHTTPReply::ok) {
                             pConnection->SendReply(status, nullptr, true);
@@ -328,7 +328,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::DoDone(CFetchHandler *AHandler, CHTTPReply *Reply) {
+        void CPGFetch::DoDone(CFetchHandler *AHandler, const CHTTPReply &Reply) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
@@ -341,12 +341,12 @@ namespace Apostol {
                 DoError(E);
             };
 
-            const auto& caContentType = Reply->Headers[_T("Content-Type")].Lower();
+            const auto& caContentType = Reply.Headers[_T("Content-Type")].Lower();
 
             const auto &caPayload = AHandler->Payload();
 
-            const auto &caHeaders = HeadersToJson(Reply->Headers).ToString();
-            const auto &caContent = caContentType == "application/json" ? PQQuoteLiteralJson(Reply->Content) : PQQuoteLiteral(Reply->Content);
+            const auto &caHeaders = HeadersToJson(Reply.Headers).ToString();
+            const auto &caContent = caContentType == "application/json" ? PQQuoteLiteralJson(Reply.Content) : PQQuoteLiteral(Reply.Content);
 
             const auto &caRequest = caPayload["id"].AsString();
             const auto &caDone = caPayload["done"];
@@ -357,8 +357,8 @@ namespace Apostol {
                             .MaxFormatSize(256 + caRequest.Size() + caHeaders.Size() + caContent.Size())
                             .Format("SELECT http.create_response(%s::uuid, %d, %s, %s::jsonb, %s);",
                                     PQQuoteLiteral(caRequest).c_str(),
-                                    (int) Reply->Status,
-                                    PQQuoteLiteral(Reply->StatusText).c_str(),
+                                    (int) Reply.Status,
+                                    PQQuoteLiteral(Reply.StatusText).c_str(),
                                     PQQuoteLiteral(caHeaders).c_str(),
                                     caContent.c_str()
                             ));
@@ -475,7 +475,7 @@ namespace Apostol {
 
         void CPGFetch::DoFetch(CQueueHandler *AHandler) {
 
-            auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest &Request) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
                 const auto &caPayload = pHandler->Payload();
@@ -487,30 +487,30 @@ namespace Apostol {
                 const auto &caContent = caPayload["content"];
 
                 if (!caContent.IsNull()) {
-                    ARequest->Content = caContent.AsString();
+                    Request.Content = caContent.AsString();
                 }
 
                 CLocation URI(caPayload["resource"].AsString());
 
-                CHTTPRequest::Prepare(ARequest, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
+                CHTTPRequest::Prepare(Request, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
 
                 if (!caAuthorization.IsNull()) {
-                    ARequest->AddHeader(_T("Authorization"), caAuthorization.AsString());
+                    Request.AddHeader(_T("Authorization"), caAuthorization.AsString());
                 }
 
-                DebugRequest(ARequest);
+                DebugRequest(Request);
             };
             //----------------------------------------------------------------------------------------------------------
 
             auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pReply = pConnection->Reply();
+                auto &Reply = pConnection->Reply();
 
-                DebugReply(pReply);
+                DebugReply(Reply);
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
-                    DoDone(pHandler, pReply);
+                    DoDone(pHandler, Reply);
                 }
 
                 return true;
@@ -560,12 +560,12 @@ namespace Apostol {
 
         void CPGFetch::PQGet(CHTTPServerConnection *AConnection, const CString &Path) {
 
-            auto pRequest = AConnection->Request();
+            const auto &caRequest = AConnection->Request();
 
             CStringList SQL;
 
-            const auto &caHeaders = HeadersToJson(pRequest->Headers).ToString();
-            const auto &caParams = ParamsToJson(pRequest->Params).ToString();
+            const auto &caHeaders = HeadersToJson(caRequest.Headers).ToString();
+            const auto &caParams = ParamsToJson(caRequest.Params).ToString();
 
             SQL.Add(CString()
                             .MaxFormatSize(256 + Path.Size() + caHeaders.Size() + caParams.Size())
@@ -586,12 +586,12 @@ namespace Apostol {
 
         void CPGFetch::PQPost(CHTTPServerConnection *AConnection, const CString &Path, const CString &Body) {
 
-            auto pRequest = AConnection->Request();
+            const auto &caRequest = AConnection->Request();
 
             CStringList SQL;
 
-            const auto &caHeaders = HeadersToJson(pRequest->Headers).ToString();
-            const auto &caParams = ParamsToJson(pRequest->Params).ToString();
+            const auto &caHeaders = HeadersToJson(caRequest.Headers).ToString();
+            const auto &caParams = ParamsToJson(caRequest.Params).ToString();
             const auto &caBody = Body.IsEmpty() ? "null" : PQQuoteLiteral(Body);
 
             SQL.Add(CString()
@@ -614,12 +614,12 @@ namespace Apostol {
 
         void CPGFetch::DoGet(CHTTPServerConnection *AConnection) {
 
-            auto pRequest = AConnection->Request();
-            auto pReply = AConnection->Reply();
+            const auto &caRequest = AConnection->Request();
+            auto &Reply = AConnection->Reply();
 
-            pReply->ContentType = CHTTPReply::json;
+            Reply.ContentType = CHTTPReply::json;
 
-            const auto &path = pRequest->Location.pathname;
+            const auto &path = caRequest.Location.pathname;
 
             if (path.IsEmpty()) {
                 AConnection->SendStockReply(CHTTPReply::not_found);
@@ -632,27 +632,27 @@ namespace Apostol {
 
         void CPGFetch::DoPost(CHTTPServerConnection *AConnection) {
 
-            auto pRequest = AConnection->Request();
-            auto pReply = AConnection->Reply();
+            const auto &caRequest = AConnection->Request();
+            auto &Reply = AConnection->Reply();
 
-            pReply->ContentType = CHTTPReply::json;
+            Reply.ContentType = CHTTPReply::json;
 
-            const auto &path = pRequest->Location.pathname;
+            const auto &path = caRequest.Location.pathname;
 
             if (path.IsEmpty()) {
                 AConnection->SendStockReply(CHTTPReply::not_found);
                 return;
             }
 
-            const auto& caContentType = pRequest->Headers[_T("Content-Type")].Lower();
+            const auto& caContentType = caRequest.Headers[_T("Content-Type")].Lower();
             const auto bContentJson = (caContentType.Find(_T("application/json")) != CString::npos);
 
             CJSON Json;
             if (!bContentJson) {
-                ContentToJson(pRequest, Json);
+                ContentToJson(caRequest, Json);
             }
 
-            const auto& caBody = bContentJson ? pRequest->Content : Json.ToString();
+            const auto& caBody = bContentJson ? caRequest.Content : Json.ToString();
 
             PQPost(AConnection, path, caBody);
         }

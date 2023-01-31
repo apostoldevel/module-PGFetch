@@ -89,7 +89,7 @@ namespace Apostol {
 
             void DoQuery(CQueueHandler *AHandler);
             void DoFetch(CQueueHandler *AHandler);
-            void DoDone(CFetchHandler *AHandler, CHTTPReply *Reply);
+            void DoDone(CFetchHandler *AHandler, const CHTTPReply &Reply);
             void DoFail(CFetchHandler *AHandler, const CString &Message);
 
             void DoGet(CHTTPServerConnection *AConnection) override;
