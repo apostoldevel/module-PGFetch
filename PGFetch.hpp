@@ -2,7 +2,7 @@
 
 Program name:
 
-  Apostol Web Service
+  Apostol CRM
 
 Module Name:
 
@@ -46,7 +46,7 @@ namespace Apostol {
 
         public:
 
-            CFetchHandler(CQueueCollection *AConnection, const CString &RequestId, COnQueueHandlerEvent && Handler);
+            CFetchHandler(CQueueCollection *ACollection, const CString &RequestId, COnQueueHandlerEvent && Handler);
 
             ~CFetchHandler() override = default;
 

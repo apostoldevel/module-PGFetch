@@ -2,7 +2,7 @@
 
 Program name:
 
-  Apostol Web Service
+  Apostol CRM
 
 Module Name:
 
@@ -76,12 +76,12 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        //-- CPGFetch -------------------------------------------------------------------------------------------------
+        //-- CPGFetch --------------------------------------------------------------------------------------------------
 
         //--------------------------------------------------------------------------------------------------------------
 
-        CPGFetch::CPGFetch(CModuleProcess *AProcess): CApostolModule(AProcess, "pg fetch", "module/PGFetch"),
-                CQueueCollection(Config()->PostgresPollMin()) {
+        CPGFetch::CPGFetch(CModuleProcess *AProcess): CQueueCollection(Config()->PostgresPollMin()),
+                CApostolModule(AProcess, "pg fetch", "module/PGFetch") {
 
             m_Headers.Add("Authorization");
 
@@ -455,7 +455,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            SQL.Add(CString().Format("SELECT * FROM http.request WHERE id = %s::uuid;",
+            SQL.Add(CString().Format("SELECT * FROM http.request(%s::uuid);",
                                     PQQuoteLiteral(pHandler->RequestId()).c_str()
                             ));
 
