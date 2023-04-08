@@ -31,6 +31,34 @@ namespace Apostol {
 
     namespace Module {
 
+        class CPGFetch;
+        class CFetchThread;
+        class CFetchThreadMgr;
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CCurlFetch ------------------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CCurlFetch: public CCurlApi {
+        private:
+
+            mutable CStringList m_Into;
+
+        protected:
+
+            void CurlInfo() const override;
+
+        public:
+
+            CCurlFetch();
+            ~CCurlFetch() override = default;
+
+            int GetResponseCode() const;
+
+        };
+
         //--------------------------------------------------------------------------------------------------------------
 
         //-- CFetchHandler ---------------------------------------------------------------------------------------------
@@ -39,6 +67,8 @@ namespace Apostol {
 
         class CFetchHandler: public CQueueHandler {
         private:
+
+            CFetchThread *m_pThread;
 
             CString m_RequestId;
 
@@ -52,8 +82,106 @@ namespace Apostol {
 
             const CString &RequestId() const { return m_RequestId; }
 
+            CFetchThread *Thread() const { return m_pThread; };
+            void SetThread(CFetchThread *AThread) { m_pThread = AThread; };
+
             CJSON &Payload() { return m_Payload; }
             const CJSON &Payload() const { return m_Payload; }
+
+        };
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CFetchThread ----------------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CFetchThread: public CThread, public CGlobalComponent {
+        private:
+
+            CPGFetch *m_pFetch;
+
+        protected:
+
+            CFetchHandler *m_pHandler;
+            CFetchThreadMgr *m_pThreadMgr;
+
+        public:
+
+            explicit CFetchThread(CPGFetch *AFetch, CFetchHandler *AHandler, CFetchThreadMgr *AThreadMgr);
+
+            ~CFetchThread() override;
+
+            void Execute() override;
+
+            void TerminateAndWaitFor();
+
+            CFetchHandler *Handler() { return m_pHandler; };
+            void Handler(CFetchHandler *Value) { m_pHandler = Value; };
+
+        };
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CFetchThreadMgr -------------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CFetchThreadMgr {
+        protected:
+
+            CThreadList m_ActiveThreads;
+            CThreadPriority m_ThreadPriority;
+
+        public:
+
+            CFetchThreadMgr();
+
+            virtual ~CFetchThreadMgr();
+
+            virtual CFetchThread *GetThread(CPGFetch *AFetch, CFetchHandler *AHandler);
+
+            virtual void ReleaseThread(CFetchThread *AThread) abstract;
+
+            void TerminateThreads();
+
+            CThreadList &ActiveThreads() { return m_ActiveThreads; }
+            const CThreadList &ActiveThreads() const { return m_ActiveThreads; }
+
+            CThreadPriority ThreadPriority() const { return m_ThreadPriority; }
+            void ThreadPriority(CThreadPriority Value) { m_ThreadPriority = Value; }
+
+        }; // CFetchThreadMgr
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CFetchThreadMgrDefault ------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CFetchThreadMgrDefault : public CFetchThreadMgr {
+            typedef CFetchThreadMgr inherited;
+
+        public:
+
+            ~CFetchThreadMgrDefault() override {
+                TerminateThreads();
+            };
+
+            CFetchThread *GetThread(CPGFetch *AFetch, CFetchHandler *AHandler) override {
+                return inherited::GetThread(AFetch, AHandler);
+            };
+
+            void ReleaseThread(CFetchThread *AThread) override {
+                if (!IsCurrentThread(AThread)) {
+                    AThread->FreeOnTerminate(false);
+                    AThread->TerminateAndWaitFor();
+                    FreeAndNil(AThread);
+                } else {
+                    AThread->FreeOnTerminate(true);
+                    AThread->Terminate();
+                }
+            };
 
         };
 
@@ -68,10 +196,15 @@ namespace Apostol {
 
             CDateTime m_CheckDate;
 
+            CFetchThreadMgrDefault m_ThreadMgr;
+
             void InitListen();
             void CheckListen();
 
             void CheckTimeOut(CDateTime Now);
+
+            CFetchThread *GetThread(CFetchHandler *AHandler);
+            void OnTerminate(CObject *Sender);
 
             static CJSON ParamsToJson(const CStringList &Params);
             static CJSON HeadersToJson(const CHeaders &Headers);
@@ -89,6 +222,9 @@ namespace Apostol {
 
             void DoQuery(CQueueHandler *AHandler);
             void DoFetch(CQueueHandler *AHandler);
+
+            void DoThread(CQueueHandler *AHandler);
+
             void DoDone(CFetchHandler *AHandler, const CHTTPReply &Reply);
             void DoFail(CFetchHandler *AHandler, const CString &Message);
 
@@ -123,6 +259,8 @@ namespace Apostol {
             bool Enabled() override;
 
             bool CheckLocation(const CLocation &Location) override;
+
+            void CURL(CQueueHandler *AHandler);
 
         };
 
