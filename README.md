@@ -1,52 +1,52 @@
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](https://github.com/apostoldevel/apostol/blob/master/README.ru-RU.md)
+
 Postgres Fetch
 -
-**PGFetch** - модуль для [Апостол](https://github.com/apostoldevel/apostol).
 
-Описание
+**PGFetch** - a module for [Apostol](https://github.com/apostoldevel/apostol).
+
+Description
 -
-**PGFetch** предоставляет возможность принимать и отправлять HTTP-запросы на языке программирования PL/pgSQL.
+**PGFetch** provides the ability to receive and send HTTP requests using the PL/pgSQL programming language.
 
-Входящие запросы
+Incoming requests
 -
+The module directs incoming HTTP `GET` and `POST` requests to the PostgreSQL database by calling the `http.get` and `http.post` functions, respectively, to process them.
 
-Модуль направляет входящие HTTP `GET` и `POST` запросы в базу данных PostgreSQL вызывая для их обработки функции `http.get` и `http.post` соответственно.
+Incoming requests are recorded in the `http.log` table.
 
-Входящие запросы записываются в таблицу `http.log`.
-
-Исходящие запросы
+Outgoing requests
 -
+The module is capable of not only receiving HTTP requests but also sending them on a signal from the database.
 
-Модуль умеет не только принимать HTTP-запросы но и отправлять их по сигналу из базы данных.
-
-Пример:
+Example:
 
 ~~~postgresql
--- Выполнить запрос к самому себе
+-- Execute a request to yourself
 SELECT http.fetch('http://localhost:8080/api/v1/time');
 ~~~
 
-Исходящие запросы записываются в таблицу `http.request`, результат выполнения запроса будет сохранён в таблице `http.response`.
+Outgoing requests are recorded in the `http.request` table, and the result of the request execution is stored in the `http.response` table.
 
-Для удобноного просмотра исходящих запросов и полученных на них ответов воспользуйтесь представлением `http.fetch`:
+To conveniently view outgoing requests and the responses received for them, use the `http.fetch` view:
 
-```postgresql
-SELECT * FROM http.fetch ORDER BY start DESC; 
-```
+~~~postgresql
+SELECT * FROM http.fetch ORDER BY datestart DESC;
+~~~
 
-Функция `http.fetch()` асинхронная, в качестве ответа она вернёт уникальный номер исходящего запроса.
+The `http.fetch()` function is asynchronous, and it returns a unique identifier for the outgoing request as a response.
 
-Функции обратного вызова
+Callback functions
 -
+In the `http.fetch()` function, you can pass the name of a callback function for processing a successful response or in the case of a failure.
 
-В функцию `http.fetch()` можно передать имя функции обратного вызова как для обработки успешного ответа так и в случае сбоя.
-
-```postgresql
+~~~postgresql
 SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
-```
+~~~
 
-Функции обратного вызова должна быть создана заранее и в качестве параметра она должна принимать уникальный номер исходящего запроса (тип `uuid`).
+The callback functions must be created in advance, and they must accept the unique identifier of the outgoing request (of type uuid) as a parameter.
 
-```postgresql
+~~~postgresql
 CREATE OR REPLACE FUNCTION http.done (
   pRequest  uuid
 ) RETURNS   void
@@ -61,9 +61,9 @@ END;
 $$ LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = http, pg_temp;
-```
+~~~
 
-```postgresql
+~~~postgresql
 CREATE OR REPLACE FUNCTION http.fail (
   pRequest  uuid
 ) RETURNS   void
@@ -78,88 +78,89 @@ END;
 $$ LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = http, pg_temp;
-) RETURNS   void
-```
+~~~
 
-
-
-Установка базы данных
+Database installation
 -
-Следуйте указаниям по установке PostgeSQL в описании [Апостол](https://github.com/apostoldevel/apostol#postgresql)
+Follow the instructions for installing PostgeSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
 
-Установка модуля
+Module installation
 -
-Следуйте указаниям по сборке и установке [Апостол](https://github.com/apostoldevel/apostol#%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0)
 
-## Общая информация
-* Базовая конечная точка (endpoint url): [http://localhost:8080/api/v1](http://localhost:8080/api/v1);
-  * Модуль принимает только те запросы путь которых начинаются с `/api` (можно изменить в исходном коде).
-* Все конечные точки возвращают: `JSON-объект` или `JSON-массив` в зависимости от количества записей в ответе. Изменить это поведение можно добавив в запрос параметр `?data_array=true` тогда ответ будет `JSON-массив` в независимости от количества записей;
+Follow the instructions for building and installing [Apostol](https://github.com/apostoldevel/apostol#%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0).
 
-### Формат endpoint url:
-```
+General information
+-
+
+* Base endpoint URL: [http://localhost:8080/api/v1](http://localhost:8080/api/v1);
+  * The module only accepts requests whose path starts with `/api` (this can be changed in the source code).
+* All endpoints return either a `JSON object` or a `JSON array` depending on the number of records in the response. This behavior can be changed by adding the `?data_array=true` parameter to the request, in which case the response will be a `JSON array` regardless of the number of records.
+
+* Endpoint URL format:
+~~~
 http[s]://<hosthame>[:<port>]/api/<route>
-```
+~~~
+ 
+## HTTP Status Codes
+* HTTP `4XX` status codes are used for client-side errors - the problem is on the client side.
+* HTTP `5XX` status codes are used for internal errors - the problem is on the server side. It is important **NOT** to consider this as a failure operation. The execution status is **UNKNOWN** and may be successful.
+ 
+## Passing Parameters
+* For `GET` endpoints, parameters should be sent as a `query string`.
+* For `POST` endpoints, some parameters can be sent as a `query string`, and some as a request body:
+* The following content types are allowed when sending parameters as a request `body`:
+  * `application/x-www-form-urlencoded` for `query string`;
+  * `multipart/form-data` for `HTML forms`;
+  * `application/json` for `JSON`.
+* Parameters can be sent in any order.
 
-## HTTP коды возврата
-* HTTP `4XX` коды возврата применимы для некорректных запросов - проблема на стороне клиента.
-* HTTP `5XX` коды возврата используются для внутренних ошибок - проблема на стороне сервера. Важно **НЕ** рассматривать это как операцию сбоя. Статус выполнения **НЕИЗВЕСТЕН** и может быть успешным.
+Function Parameters
+_
 
-## Передача параметров
-* Для `GET` конечных точек параметры должны быть отправлены в виде `строки запроса (query string)` .
-* Для `POST` конечных точек, некоторые параметры могут быть отправлены в виде `строки запроса (query string)`, а некоторые в виде `тела запроса (request body)`:
-* При отправке параметров в виде `тела запроса` допустимы следующие типы контента:
-  * `application/x-www-form-urlencoded` для `query string`;
-  * `multipart/form-data` для `HTML-форм`;
-  * `application/json` для `JSON`.
-* Параметры могут быть отправлены в любом порядке.
-
-Парамерты функций
--
-Для обработки `GET` запроса:
+To handle a `GET` request:
 ~~~postgresql
 /**
- * @param {text} path - Путь
- * @param {jsonb} headers - HTTP заголовки
- * @param {jsonb} params - Параметры запроса
- * @return {SETOF json}
- */
+* @param {text} path - Path
+* @param {jsonb} headers - HTTP headers
+* @param {jsonb} params - Query parameters
+* @return {SETOF json}
+**/
 CREATE OR REPLACE FUNCTION http.get (
   path      text,
   headers   jsonb,
   params    jsonb DEFAULT null
 ) RETURNS   SETOF json
-~~~ 
+~~~
 
-Для обработки `POST` запроса:
+To handle a `POST` request:
 ~~~postgresql
 /**
- * @param {text} path - Путь
- * @param {jsonb} headers - HTTP заголовки
- * @param {jsonb} params - Параметры запроса
- * @param {jsonb} body - Тело запроса
- * @return {SETOF json}
- */
+* @param {text} path - Path
+* @param {jsonb} headers - HTTP headers
+* @param {jsonb} params - Query parameters
+* @param {jsonb} body - Request body
+* @return {SETOF json}
+**/
 CREATE OR REPLACE FUNCTION http.post (
   path      text,
   headers   jsonb,
   params    jsonb DEFAULT null,
   body      jsonb DEFAULT null
 ) RETURNS   SETOF json
-~~~ 
+~~~
 
-Для отправки `GET` или `POST` запроса:
+To send a `GET` or `POST` request:
 ~~~postgresql
 /**
- * Выполняет HTTP запрос.
- * @param {text} resource - Ресурс
- * @param {text} method - Метод
- * @param {jsonb} headers - HTTP заголовки
- * @param {text} content - Содержание запроса
- * @param {text} done - Имя функции обратного вызова в случае успешного ответа
- * @param {text} fail - Имя функции обратного вызова в случае сбоя
- * @return {uuid}
- */
+* Performs an HTTP request.
+* @param {text} resource - Resource
+* @param {text} method - Method
+* @param {jsonb} headers - HTTP headers
+* @param {text} content - Request content
+* @param {text} done - Name of the callback function in case of a successful response
+* @param {text} fail - Name of the callback function in case of a failure
+* @return {uuid}
+**/
 CREATE OR REPLACE FUNCTION http.fetch (
   resource  text,
   method    text DEFAULT 'GET',
