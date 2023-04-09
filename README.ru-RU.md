@@ -22,7 +22,7 @@ Postgres Fetch
 
 Пример:
 
-~~~postgresql
+~~~sql
 -- Выполнить запрос к самому себе
 SELECT http.fetch('http://localhost:8080/api/v1/time');
 ~~~
@@ -31,9 +31,9 @@ SELECT http.fetch('http://localhost:8080/api/v1/time');
 
 Для удобноного просмотра исходящих запросов и полученных на них ответов воспользуйтесь представлением `http.fetch`:
 
-```postgresql
+~~~sql
 SELECT * FROM http.fetch ORDER BY datestart DESC; 
-```
+~~~
 
 Функция `http.fetch()` асинхронная, в качестве ответа она вернёт уникальный номер исходящего запроса.
 
@@ -42,13 +42,13 @@ SELECT * FROM http.fetch ORDER BY datestart DESC;
 
 В функцию `http.fetch()` можно передать имя функции обратного вызова как для обработки успешного ответа так и в случае сбоя.
 
-```postgresql
+~~~sql
 SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
-```
+~~~
 
 Функции обратного вызова должна быть создана заранее и в качестве параметра она должна принимать уникальный номер исходящего запроса (тип `uuid`).
 
-```postgresql
+~~~sql
 CREATE OR REPLACE FUNCTION http.done (
   pRequest  uuid
 ) RETURNS   void
@@ -63,9 +63,9 @@ END;
 $$ LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = http, pg_temp;
-```
+~~~
 
-```postgresql
+~~~sql
 CREATE OR REPLACE FUNCTION http.fail (
   pRequest  uuid
 ) RETURNS   void
@@ -80,7 +80,7 @@ END;
 $$ LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = http, pg_temp;
-```
+~~~
 
 Установка базы данных
 -
@@ -96,9 +96,9 @@ $$ LANGUAGE plpgsql
 * Все конечные точки возвращают: `JSON-объект` или `JSON-массив` в зависимости от количества записей в ответе. Изменить это поведение можно добавив в запрос параметр `?data_array=true` тогда ответ будет `JSON-массив` в независимости от количества записей;
 
 ### Формат endpoint url:
-```
+~~~
 http[s]://<hosthame>[:<port>]/api/<route>
-```
+~~~
 
 ## HTTP коды возврата
 * HTTP `4XX` коды возврата применимы для некорректных запросов - проблема на стороне клиента.
@@ -116,7 +116,7 @@ http[s]://<hosthame>[:<port>]/api/<route>
 Парамерты функций
 -
 Для обработки `GET` запроса:
-~~~postgresql
+~~~sql
 /**
  * @param {text} path - Путь
  * @param {jsonb} headers - HTTP заголовки
@@ -131,7 +131,7 @@ CREATE OR REPLACE FUNCTION http.get (
 ~~~ 
 
 Для обработки `POST` запроса:
-~~~postgresql
+~~~sql
 /**
  * @param {text} path - Путь
  * @param {jsonb} headers - HTTP заголовки
@@ -148,7 +148,7 @@ CREATE OR REPLACE FUNCTION http.post (
 ~~~ 
 
 Для отправки `GET` или `POST` запроса:
-~~~postgresql
+~~~sql
 /**
  * Выполняет HTTP запрос.
  * @param {text} resource - Ресурс

@@ -21,7 +21,7 @@ The module is capable of not only receiving HTTP requests but also sending them 
 
 Example:
 
-~~~postgresql
+~~~sql
 -- Execute a request to yourself
 SELECT http.fetch('http://localhost:8080/api/v1/time');
 ~~~
@@ -30,7 +30,7 @@ Outgoing requests are recorded in the `http.request` table, and the result of th
 
 To conveniently view outgoing requests and the responses received for them, use the `http.fetch` view:
 
-~~~postgresql
+~~~sql
 SELECT * FROM http.fetch ORDER BY datestart DESC;
 ~~~
 
@@ -40,13 +40,13 @@ Callback functions
 -
 In the `http.fetch()` function, you can pass the name of a callback function for processing a successful response or in the case of a failure.
 
-~~~postgresql
+~~~sql
 SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
 ~~~
 
 The callback functions must be created in advance, and they must accept the unique identifier of the outgoing request (of type uuid) as a parameter.
 
-~~~postgresql
+~~~sql
 CREATE OR REPLACE FUNCTION http.done (
   pRequest  uuid
 ) RETURNS   void
@@ -63,7 +63,7 @@ $$ LANGUAGE plpgsql
   SET search_path = http, pg_temp;
 ~~~
 
-~~~postgresql
+~~~sql
 CREATE OR REPLACE FUNCTION http.fail (
   pRequest  uuid
 ) RETURNS   void
@@ -115,10 +115,10 @@ http[s]://<hosthame>[:<port>]/api/<route>
 * Parameters can be sent in any order.
 
 Function Parameters
-_
+-
 
 To handle a `GET` request:
-~~~postgresql
+~~~sql
 /**
 * @param {text} path - Path
 * @param {jsonb} headers - HTTP headers
@@ -133,7 +133,7 @@ CREATE OR REPLACE FUNCTION http.get (
 ~~~
 
 To handle a `POST` request:
-~~~postgresql
+~~~sql
 /**
 * @param {text} path - Path
 * @param {jsonb} headers - HTTP headers
@@ -150,7 +150,7 @@ CREATE OR REPLACE FUNCTION http.post (
 ~~~
 
 To send a `GET` or `POST` request:
-~~~postgresql
+~~~sql
 /**
 * Performs an HTTP request.
 * @param {text} resource - Resource
