@@ -44,7 +44,7 @@ namespace Apostol {
             CString Result;
             TCHAR ch;
 
-            Result = "E'";
+            Result = "'";
 
             for (size_t Index = 0; Index < Json.Size(); Index++) {
                 ch = Json.at(Index);
