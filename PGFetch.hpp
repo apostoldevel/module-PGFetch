@@ -204,7 +204,6 @@ namespace Apostol {
             void CheckTimeOut(CDateTime Now);
 
             CFetchThread *GetThread(CFetchHandler *AHandler);
-            void OnTerminate(CObject *Sender);
 
             static CJSON ParamsToJson(const CStringList &Params);
             static CJSON HeadersToJson(const CHeaders &Headers);

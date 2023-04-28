@@ -677,8 +677,6 @@ namespace Apostol {
 
         void CPGFetch::CURL(CQueueHandler *AHandler) {
 
-            TCHAR szString[_INT_T_LEN + 1] = {0};
-
             CCurlFetch curl;
             CStringList Headers;
 
@@ -732,7 +730,7 @@ namespace Apostol {
                 Reply.DelHeader("Content-Encoding");
                 Reply.DelHeader("Content-Length");
 
-                Reply.AddHeader("Content-Length", IntToStr((int) Reply.ContentLength, szString, _INT_T_LEN));
+                Reply.AddHeader("Content-Length", CString::ToString(Reply.ContentLength));
 
                 DebugReply(Reply);
 
@@ -939,21 +937,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         CFetchThread *CPGFetch::GetThread(CFetchHandler *AHandler) {
-            auto pObject = m_ThreadMgr.GetThread(this, AHandler);
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            pObject->OnTerminate([this](auto &&Sender) { OnTerminate(Sender); });
-#else
-            pObject->OnTerminate(std::bind(&CWebService::OnTerminate, this, _1));
-#endif
-            return pObject;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::OnTerminate(CObject *Sender) {
-            auto pObject = dynamic_cast<CFetchThread *> (Sender);
-            if (Assigned(pObject)) {
-                DeleteHandler(pObject->Handler());
-            }
+            return m_ThreadMgr.GetThread(this, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 
