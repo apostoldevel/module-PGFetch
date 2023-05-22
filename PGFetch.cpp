@@ -703,7 +703,7 @@ namespace Apostol {
 
             int i = 0;
             do {
-                code = curl.Send(URI, method, caContent.AsString(), Headers);
+                code = curl.Send(URI, method, caContent.AsString(), Headers, false);
                 if (code != CURLE_OK) {
                     sleep(1);
                 }
