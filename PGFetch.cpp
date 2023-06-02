@@ -49,7 +49,7 @@ namespace Apostol {
             for (size_t Index = 0; Index < Json.Size(); Index++) {
                 ch = Json.at(Index);
                 if (ch == '\'')
-                    Result.Append('\\');
+                    Result.Append('\'');
                 Result.Append(ch);
             }
 
