@@ -678,9 +678,7 @@ namespace Apostol {
         void CPGFetch::CURL(CQueueHandler *AHandler) {
 
             CCurlFetch curl;
-            CStringList Headers;
-
-            Headers.NameValueSeparator(": ");
+            CHeaders Headers;
 
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
@@ -715,7 +713,8 @@ namespace Apostol {
 
                 Reply.Headers.Clear();
                 for (i = 1; i < curl.Headers().Count(); i++) {
-                    Reply.AddHeader(curl.Headers().Names(i), curl.Headers().Values(i));
+                    const auto &Header = curl.Headers()[i];
+                    Reply.AddHeader(Header.Name(), Header.Value());
                 }
 
                 Reply.StatusString = http_code;
