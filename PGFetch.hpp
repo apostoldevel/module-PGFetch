@@ -194,6 +194,8 @@ namespace Apostol {
         class CPGFetch: public CQueueCollection, public CApostolModule {
         private:
 
+            int m_TimeOut;
+
             CDateTime m_CheckDate;
 
             CFetchThreadMgrDefault m_ThreadMgr;
@@ -247,6 +249,8 @@ namespace Apostol {
             static class CPGFetch *CreateModule(CModuleProcess *AProcess) {
                 return new CPGFetch(AProcess);
             }
+
+            void Initialization(CModuleProcess *AProcess);
 
             void UnloadQueue() override;
 

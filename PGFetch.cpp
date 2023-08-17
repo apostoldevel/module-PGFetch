@@ -198,6 +198,7 @@ namespace Apostol {
 
             m_CheckDate = 0;
             m_Progress = 0;
+            m_TimeOut = 0;
 
             CPGFetch::InitMethods();
         }
@@ -697,22 +698,16 @@ namespace Apostol {
 
             CLocation URI(caPayload["resource"].AsString());
 
-            CURLcode code;
+            curl.TimeOut(m_TimeOut);
 
-            int i = 0;
-            do {
-                code = curl.Send(URI, method, caContent.AsString(), Headers, false);
-                if (code != CURLE_OK) {
-                    sleep(1);
-                }
-            } while ((code != CURLE_OK) && ++i < 2);
+            const auto code = curl.Send(URI, method, caContent.AsString(), Headers, false);
 
             if (code == CURLE_OK) {
                 CHTTPReply Reply;
                 const auto http_code = curl.GetResponseCode();
 
                 Reply.Headers.Clear();
-                for (i = 1; i < curl.Headers().Count(); i++) {
+                for (int i = 1; i < curl.Headers().Count(); i++) {
                     const auto &Header = curl.Headers()[i];
                     Reply.AddHeader(Header.Name(), Header.Value());
                 }
@@ -748,7 +743,7 @@ namespace Apostol {
                 auto pThread = GetThread((CFetchHandler *) AHandler);
 
                 AHandler->Allow(false);
-                AHandler->UpdateTimeOut(Now());
+                AHandler->TimeOut(INFINITE);
 
                 IncProgress();
 
@@ -925,7 +920,7 @@ namespace Apostol {
                 const auto pQueue = m_Queue[index];
                 for (int i = pQueue->Count() - 1; i >= 0; i--) {
                     auto pHandler = (CFetchHandler *) pQueue->Item(i);
-                    if (pHandler != nullptr && pHandler->Thread() == nullptr) {
+                    if (pHandler != nullptr) {
                         if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
                             DoFail(pHandler, "Connection timed out");
                         }
@@ -951,9 +946,15 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CPGFetch::Initialization(CModuleProcess *AProcess) {
+            CApostolModule::Initialization(AProcess);
+            m_TimeOut = Config()->IniFile().ReadInteger(SectionName().c_str(), "timeout", 0);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         bool CPGFetch::Enabled() {
             if (m_ModuleStatus == msUnknown)
-                m_ModuleStatus = Config()->IniFile().ReadBool(SectionName(), "enable", true) ? msEnabled : msDisabled;
+                m_ModuleStatus = Config()->IniFile().ReadBool(SectionName().c_str(), "enable", true) ? msEnabled : msDisabled;
             return m_ModuleStatus == msEnabled;
         }
         //--------------------------------------------------------------------------------------------------------------
