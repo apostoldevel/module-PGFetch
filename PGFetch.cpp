@@ -702,6 +702,8 @@ namespace Apostol {
 
             const auto code = curl.Send(URI, method, caContent.AsString(), Headers, false);
 
+            CLockGuard LockGuard(&GThreadLock);
+
             if (code == CURLE_OK) {
                 CHTTPReply Reply;
                 const auto http_code = curl.GetResponseCode();
