@@ -217,6 +217,8 @@ namespace Apostol {
             static int CheckError(const CJSON &Json, CString &ErrorMessage);
             static CHTTPReply::CStatusType ErrorCodeToStatus(int ErrorCode);
 
+            void DeleteHandler(CQueueHandler *AHandler) override;
+
         protected:
 
             static void DoError(const Delphi::Exception::Exception &E);
@@ -224,7 +226,7 @@ namespace Apostol {
             void DoQuery(CQueueHandler *AHandler);
             void DoFetch(CQueueHandler *AHandler);
 
-            void DoThread(CQueueHandler *AHandler);
+            void DoThread(CFetchHandler *AHandler);
 
             void DoDone(CFetchHandler *AHandler, const CHTTPReply &Reply);
             void DoFail(CFetchHandler *AHandler, const CString &Message);
@@ -250,7 +252,7 @@ namespace Apostol {
                 return new CPGFetch(AProcess);
             }
 
-            void Initialization(CModuleProcess *AProcess);
+            void Initialization(CModuleProcess *AProcess) override;
 
             void UnloadQueue() override;
 

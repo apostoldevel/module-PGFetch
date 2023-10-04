@@ -27,6 +27,7 @@ Author:
 #include "PGFetch.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
+#define FETCH_TIMEOUT_INTERVAL 15000
 #define PG_LISTEN_NAME "http"
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -99,8 +100,8 @@ namespace Apostol {
         CFetchHandler::CFetchHandler(CQueueCollection *ACollection, const CString &RequestId, COnQueueHandlerEvent && Handler):
                 CQueueHandler(ACollection, static_cast<COnQueueHandlerEvent &&> (Handler)) {
 
-            m_TimeOut = 0;
-            m_TimeOutInterval = 15000;
+            m_TimeOut = INFINITE;
+            m_TimeOutInterval = FETCH_TIMEOUT_INTERVAL;
 
             m_RequestId = RequestId;
 
@@ -319,6 +320,15 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CPGFetch::DeleteHandler(CQueueHandler *AHandler) {
+            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+            if (Assigned(pHandler)) {
+                pHandler->DecUseCount();
+                CQueueCollection::DeleteHandler(AHandler);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CPGFetch::DoConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
@@ -532,6 +542,9 @@ namespace Apostol {
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
 
+                if (pHandler == nullptr)
+                    return;
+
                 if (APollQuery->Count() == 0) {
                     DeleteHandler(pHandler);
                     return;
@@ -565,11 +578,18 @@ namespace Apostol {
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
-                DeleteHandler(pHandler);
+                if (Assigned(pHandler)) {
+                    DeleteHandler(pHandler);
+                }
                 DoError(E);
             };
 
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
+            if (pHandler == nullptr)
+                return;
+
+            AHandler->IncUseCount();
 
             CStringList SQL;
 
@@ -581,7 +601,6 @@ namespace Apostol {
                 ExecSQL(SQL, AHandler, OnExecuted, OnException);
 
                 AHandler->Allow(false);
-                AHandler->UpdateTimeOut(Now());
 
                 IncProgress();
             } catch (Delphi::Exception::Exception &E) {
@@ -596,24 +615,26 @@ namespace Apostol {
             auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest &Request) {
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
-                const auto &caPayload = pHandler->Payload();
+                if (Assigned(pHandler)) {
+                    const auto &caPayload = pHandler->Payload();
 
-                const auto &method = caPayload["method"].AsString();
+                    const auto &method = caPayload["method"].AsString();
 
-                const auto &caContentType = caPayload["headers"]["Content-Type"];
-                const auto &caAuthorization = caPayload["headers"]["Authorization"];
-                const auto &caContent = caPayload["content"];
+                    const auto &caContentType = caPayload["headers"]["Content-Type"];
+                    const auto &caAuthorization = caPayload["headers"]["Authorization"];
+                    const auto &caContent = caPayload["content"];
 
-                if (!caContent.IsNull()) {
-                    Request.Content = caContent.AsString();
-                }
+                    if (!caContent.IsNull()) {
+                        Request.Content = caContent.AsString();
+                    }
 
-                CLocation URI(caPayload["resource"].AsString());
+                    CLocation URI(caPayload["resource"].AsString());
 
-                CHTTPRequest::Prepare(Request, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
+                    CHTTPRequest::Prepare(Request, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
 
-                if (!caAuthorization.IsNull()) {
-                    Request.AddHeader(_T("Authorization"), caAuthorization.AsString());
+                    if (!caAuthorization.IsNull()) {
+                        Request.AddHeader(_T("Authorization"), caAuthorization.AsString());
+                    }
                 }
 
                 DebugRequest(Request);
@@ -628,6 +649,7 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
+                    pHandler->DecUseCount();
                     DoDone(pHandler, Reply);
                 }
 
@@ -641,6 +663,7 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
+                    pHandler->DecUseCount();
                     DoFail(pHandler, E.what());
                 }
 
@@ -649,6 +672,13 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
+            if (pHandler == nullptr)
+                return;
+
+            pHandler->IncUseCount();
+            pHandler->TimeOut(0);
+            pHandler->UpdateTimeOut(Now());
 
             const auto &caPayload = pHandler->Payload();
 
@@ -671,6 +701,7 @@ namespace Apostol {
                 pClient->AutoFree(true);
                 pClient->Active(true);
             } catch (std::exception &e) {
+                pHandler->DecUseCount();
                 DoFail(pHandler, e.what());
             }
         }
@@ -682,6 +713,11 @@ namespace Apostol {
             CHeaders Headers;
 
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+
+            if (pHandler == nullptr)
+                return;
+
+            pHandler->IncUseCount();
 
             const auto &caPayload = pHandler->Payload();
 
@@ -701,8 +737,6 @@ namespace Apostol {
             curl.TimeOut(m_TimeOut);
 
             const auto code = curl.Send(URI, method, caContent.AsString(), Headers, false);
-
-            CLockGuard LockGuard(&GThreadLock);
 
             if (code == CURLE_OK) {
                 CHTTPReply Reply;
@@ -730,29 +764,27 @@ namespace Apostol {
 
                 DebugReply(Reply);
 
+                pHandler->DecUseCount();
                 DoDone(pHandler, Reply);
             } else {
                 const auto &error = CCurlFetch::GetErrorMessage(code);
 
                 Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, error.c_str());
+
+                pHandler->DecUseCount();
                 DoFail(pHandler, error);
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::DoThread(CQueueHandler *AHandler) {
+        void CPGFetch::DoThread(CFetchHandler *AHandler) {
             try {
-                auto pThread = GetThread((CFetchHandler *) AHandler);
-
-                AHandler->Allow(false);
-                AHandler->TimeOut(INFINITE);
-
-                IncProgress();
+                auto pThread = GetThread(AHandler);
 
                 pThread->FreeOnTerminate(true);
                 pThread->Resume();
             } catch (std::exception &e) {
-                DoFail((CFetchHandler *) AHandler, e.what());
+                DoFail(AHandler, e.what());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -922,8 +954,8 @@ namespace Apostol {
                 const auto pQueue = m_Queue[index];
                 for (int i = pQueue->Count() - 1; i >= 0; i--) {
                     auto pHandler = (CFetchHandler *) pQueue->Item(i);
-                    if (pHandler != nullptr) {
-                        if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
+                    if (pHandler != nullptr && !pHandler->Allow()) {
+                        if ((pHandler->TimeOut() != INFINITE) && (Now >= pHandler->TimeOut())) {
                             DoFail(pHandler, "Connection timed out");
                         }
                     }
