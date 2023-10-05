@@ -82,7 +82,7 @@ $$ LANGUAGE plpgsql
 
 Database installation
 -
-Follow the instructions for installing PostgeSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
+Follow the instructions for installing PostgreSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
 
 Module installation
 -
