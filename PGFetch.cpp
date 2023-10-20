@@ -421,12 +421,6 @@ namespace Apostol {
                         }
 
                         PQResultToJson(pResult, Reply.Content, result_format, result_object == "true" ? "result" : CString());
-
-                        if (status == CHTTPReply::ok) {
-                            pConnection->SendReply(status, nullptr, true);
-                        } else {
-                            ReplyError(pConnection, status, errorMessage);
-                        }
                     } catch (Delphi::Exception::Exception &E) {
                         errorMessage = E.what();
                         status = CHTTPReply::bad_request;
