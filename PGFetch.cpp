@@ -323,7 +323,7 @@ namespace Apostol {
         void CPGFetch::DeleteHandler(CQueueHandler *AHandler) {
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
             if (Assigned(pHandler)) {
-                pHandler->DecUseCount();
+                pHandler->Unlock();
                 CQueueCollection::DeleteHandler(AHandler);
             }
         }
@@ -583,7 +583,7 @@ namespace Apostol {
             if (pHandler == nullptr)
                 return;
 
-            AHandler->IncUseCount();
+            AHandler->Lock();
 
             CStringList SQL;
 
@@ -643,7 +643,7 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
-                    pHandler->DecUseCount();
+                    pHandler->Unlock();
                     DoDone(pHandler, Reply);
                 }
 
@@ -657,7 +657,7 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
-                    pHandler->DecUseCount();
+                    pHandler->Unlock();
                     DoFail(pHandler, E.what());
                 }
 
@@ -670,7 +670,7 @@ namespace Apostol {
             if (pHandler == nullptr)
                 return;
 
-            pHandler->IncUseCount();
+            pHandler->Lock();
             pHandler->TimeOut(0);
             pHandler->UpdateTimeOut(Now());
 
@@ -695,7 +695,7 @@ namespace Apostol {
                 pClient->AutoFree(true);
                 pClient->Active(true);
             } catch (std::exception &e) {
-                pHandler->DecUseCount();
+                pHandler->Unlock();
                 DoFail(pHandler, e.what());
             }
         }
@@ -711,7 +711,7 @@ namespace Apostol {
             if (pHandler == nullptr)
                 return;
 
-            pHandler->IncUseCount();
+            pHandler->Lock();
 
             const auto &caPayload = pHandler->Payload();
 
@@ -758,14 +758,14 @@ namespace Apostol {
 
                 DebugReply(Reply);
 
-                pHandler->DecUseCount();
+                pHandler->Unlock();
                 DoDone(pHandler, Reply);
             } else {
                 const auto &error = CCurlFetch::GetErrorMessage(code);
 
                 Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, error.c_str());
 
-                pHandler->DecUseCount();
+                pHandler->Unlock();
                 DoFail(pHandler, error);
             }
         }
