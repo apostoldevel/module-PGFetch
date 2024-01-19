@@ -457,12 +457,10 @@ namespace Apostol {
                 DoError(E);
             };
 
-            const auto& caContentType = Reply.Headers[_T("Content-Type")].Lower();
-
             const auto &caPayload = AHandler->Payload();
 
-            const auto &caHeaders = HeadersToJson(Reply.Headers).ToString();
-            const auto &caContent = caContentType == "application/json" ? PQQuoteLiteralJson(Reply.Content) : PQQuoteLiteral(Reply.Content);
+            const auto &caHeaders = PQQuoteLiteral(HeadersToJson(Reply.Headers).ToString());
+            const auto &caContent = PQQuoteLiteral(base64_encode(Reply.Content));
 
             const auto &caRequest = caPayload["id"].AsString();
             const auto &caDone = caPayload["done"];
@@ -471,11 +469,11 @@ namespace Apostol {
 
             SQL.Add(CString()
                             .MaxFormatSize(256 + caRequest.Size() + caHeaders.Size() + caContent.Size())
-                            .Format("SELECT http.create_response(%s::uuid, %d, %s, %s::jsonb, %s);",
+                            .Format("SELECT http.create_response(%s::uuid, %d, %s, %s::jsonb, decode(%s, 'base64'));",
                                     PQQuoteLiteral(caRequest).c_str(),
                                     (int) Reply.Status,
                                     PQQuoteLiteral(Reply.StatusText).c_str(),
-                                    PQQuoteLiteral(caHeaders).c_str(),
+                                    caHeaders.c_str(),
                                     caContent.c_str()
                             ));
 
@@ -612,22 +610,22 @@ namespace Apostol {
                 if (Assigned(pHandler)) {
                     const auto &caPayload = pHandler->Payload();
 
-                    const auto &method = caPayload["method"].AsString();
-
+                    const auto &caMethod = caPayload["method"].AsString();
+                    const auto &caHeaders = caPayload["headers"];
                     const auto &caContentType = caPayload["headers"]["Content-Type"];
-                    const auto &caAuthorization = caPayload["headers"]["Authorization"];
                     const auto &caContent = caPayload["content"];
 
                     if (!caContent.IsNull()) {
-                        Request.Content = caContent.AsString();
+                        Request.Content = base64_decode(caContent.AsString());
                     }
 
                     CLocation URI(caPayload["resource"].AsString());
 
-                    CHTTPRequest::Prepare(Request, method.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
+                    CHTTPRequest::Prepare(Request, caMethod.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
 
-                    if (!caAuthorization.IsNull()) {
-                        Request.AddHeader(_T("Authorization"), caAuthorization.AsString());
+                    for (int i = 0; i < caHeaders.Count(); i++) {
+                        const auto &caHeader = caHeaders.Members(i);
+                        Request.Headers.Values(caHeader.String(), caHeader.Value().AsString());
                     }
                 }
 
@@ -701,19 +699,17 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::CURL(CQueueHandler *AHandler) {
+        void CPGFetch::CURL(CFetchHandler *AHandler) {
+
+            if (AHandler == nullptr)
+                return;
 
             CCurlFetch curl;
             CHeaders Headers;
 
-            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+            AHandler->Lock();
 
-            if (pHandler == nullptr)
-                return;
-
-            pHandler->Lock();
-
-            const auto &caPayload = pHandler->Payload();
+            const auto &caPayload = AHandler->Payload();
 
             const auto &method = caPayload["method"].AsString();
 
@@ -724,13 +720,13 @@ namespace Apostol {
                 Headers.AddPair(caHeader.String(), caHeader.Value().AsString());
             }
 
-            const auto &caContent = caPayload["content"];
+            const auto &content = base64_decode(caPayload["content"].AsString());
 
             CLocation URI(caPayload["resource"].AsString());
 
             curl.TimeOut(m_TimeOut);
 
-            const auto code = curl.Send(URI, method, caContent.AsString(), Headers, false);
+            const auto code = curl.Send(URI, method, content, Headers, false);
 
             if (code == CURLE_OK) {
                 CHTTPReply Reply;
@@ -758,15 +754,15 @@ namespace Apostol {
 
                 DebugReply(Reply);
 
-                pHandler->Unlock();
-                DoDone(pHandler, Reply);
+                AHandler->Unlock();
+                DoDone(AHandler, Reply);
             } else {
                 const auto &error = CCurlFetch::GetErrorMessage(code);
 
                 Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, error.c_str());
 
-                pHandler->Unlock();
-                DoFail(pHandler, error);
+                AHandler->Unlock();
+                DoFail(AHandler, error);
             }
         }
         //--------------------------------------------------------------------------------------------------------------

@@ -265,7 +265,7 @@ namespace Apostol {
 
             bool CheckLocation(const CLocation &Location) override;
 
-            void CURL(CQueueHandler *AHandler);
+            void CURL(CFetchHandler *AHandler);
 
         };
 
