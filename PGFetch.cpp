@@ -29,6 +29,7 @@ Author:
 
 #define FETCH_TIMEOUT_INTERVAL 15000
 #define PG_LISTEN_NAME "http"
+#define PG_FETCH_HEADER_ATTACHE_FILE "x-attache-file"
 //----------------------------------------------------------------------------------------------------------------------
 
 extern "C++" {
@@ -612,11 +613,18 @@ namespace Apostol {
 
                     const auto &caMethod = caPayload["method"].AsString();
                     const auto &caHeaders = caPayload["headers"];
-                    const auto &caContentType = caPayload["headers"]["Content-Type"];
+                    const auto &caContentType = caHeaders["Content-Type"];
                     const auto &caContent = caPayload["content"];
 
-                    if (!caContent.IsNull()) {
-                        Request.Content = base64_decode(caContent.AsString());
+                    if (caMethod == "PUT" && caHeaders.HasOwnProperty(PG_FETCH_HEADER_ATTACHE_FILE)) {
+                        const auto &caAttacheFile = caHeaders[PG_FETCH_HEADER_ATTACHE_FILE].AsString();
+                        if (FileExists(caAttacheFile.c_str())) {
+                            Request.Content.LoadFromFile(caAttacheFile);
+                        }
+                    } else {
+                        if (!caContent.IsNull()) {
+                            Request.Content = base64_decode(caContent.AsString());
+                        }
                     }
 
                     CLocation URI(caPayload["resource"].AsString());
@@ -625,7 +633,9 @@ namespace Apostol {
 
                     for (int i = 0; i < caHeaders.Count(); i++) {
                         const auto &caHeader = caHeaders.Members(i);
-                        Request.Headers.Values(caHeader.String(), caHeader.Value().AsString());
+                        if (caHeader.String() != PG_FETCH_HEADER_ATTACHE_FILE) {
+                            Request.Headers.Values(caHeader.String(), caHeader.Value().AsString());
+                        }
                     }
                 }
 
