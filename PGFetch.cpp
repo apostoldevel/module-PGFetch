@@ -62,38 +62,6 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        //-- CCurlFetch ------------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        CCurlFetch::CCurlFetch(): CCurlApi() {
-
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CCurlFetch::CurlInfo() const {
-            char *url = nullptr;
-
-            TCHAR szString[_INT_T_LEN + 1] = {0};
-
-            long response_code;
-
-            curl_easy_getinfo(m_curl, CURLINFO_RESPONSE_CODE, &response_code);
-            curl_easy_getinfo(m_curl, CURLINFO_EFFECTIVE_URL, &url);
-
-            m_Into.Clear();
-            m_Into.AddPair("CURLINFO_RESPONSE_CODE", IntToStr((int) response_code, szString, _INT_T_LEN));
-            m_Into.AddPair("CURLINFO_EFFECTIVE_URL", url);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        int CCurlFetch::GetResponseCode() const {
-            const auto &code = m_Into["CURLINFO_RESPONSE_CODE"];
-            return code.empty() ? 0 : (int) StrToInt(code.c_str());
-        }
-
-        //--------------------------------------------------------------------------------------------------------------
-
         //-- CFetchHandler ---------------------------------------------------------------------------------------------
 
         //--------------------------------------------------------------------------------------------------------------
