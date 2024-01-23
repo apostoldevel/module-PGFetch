@@ -647,6 +647,7 @@ namespace Apostol {
                 return;
 
             pHandler->Lock();
+            pHandler->Allow(false);
             pHandler->TimeOut(0);
             pHandler->UpdateTimeOut(Now());
 
@@ -906,7 +907,7 @@ namespace Apostol {
                 const auto pQueue = m_Queue[index];
                 for (int i = 0; i < pQueue->Count(); ++i) {
                     auto pHandler = (CFetchHandler *) pQueue->Item(i);
-                    if (pHandler != nullptr) {
+                    if (pHandler != nullptr && pHandler->Allow()) {
                         pHandler->Handler();
                         if (m_Progress >= m_MaxQueue)
                             break;
