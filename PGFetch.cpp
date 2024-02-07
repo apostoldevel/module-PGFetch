@@ -28,6 +28,7 @@ Author:
 //----------------------------------------------------------------------------------------------------------------------
 
 #define FETCH_TIMEOUT_INTERVAL 15000
+#define PG_CONFIG_NAME "helper"
 #define PG_LISTEN_NAME "http"
 #define PG_FETCH_HEADER_ATTACHE_FILE "x-attache-file"
 //----------------------------------------------------------------------------------------------------------------------
@@ -888,7 +889,7 @@ namespace Apostol {
             SQL.Add("LISTEN " PG_LISTEN_NAME ";");
 
             try {
-                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+                ExecSQL(SQL, nullptr, OnExecuted, OnException, PG_CONFIG_NAME);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
@@ -896,7 +897,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CPGFetch::CheckListen() {
-            if (!PQClient().CheckListen(PG_LISTEN_NAME))
+            if (!PQClient(PG_CONFIG_NAME).CheckListen(PG_LISTEN_NAME))
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
