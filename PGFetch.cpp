@@ -910,8 +910,10 @@ namespace Apostol {
                     auto pHandler = (CFetchHandler *) pQueue->Item(i);
                     if (pHandler != nullptr && pHandler->Allow()) {
                         pHandler->Handler();
-                        if (m_Progress >= m_MaxQueue)
+                        if (m_Progress >= m_MaxQueue) {
+                            Log()->Warning("[%s] [%d] [%d] Queued is full.", ModuleName().c_str(), m_Progress, m_MaxQueue);
                             break;
+                        }
                     }
                 }
             }
