@@ -170,6 +170,8 @@ namespace Apostol {
         class CPGFetch: public CQueueCollection, public CApostolModule {
         private:
 
+            CCURLClient m_Client;
+
             int m_TimeOut;
 
             CDateTime m_CheckDate;
@@ -197,11 +199,12 @@ namespace Apostol {
 
         protected:
 
-            static void DoError(const Delphi::Exception::Exception &E);
+            void DoError(const Delphi::Exception::Exception &E);
 
             void DoQuery(CQueueHandler *AHandler);
             void DoFetch(CQueueHandler *AHandler);
 
+            void DoCURL(CFetchHandler *AHandler);
             void DoThread(CFetchHandler *AHandler);
 
             void DoDone(CFetchHandler *AHandler, const CHTTPReply &Reply);
@@ -209,6 +212,8 @@ namespace Apostol {
 
             void DoGet(CHTTPServerConnection *AConnection) override;
             void DoPost(CHTTPServerConnection *AConnection);
+
+            void DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E);
 
             void DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) override;
 

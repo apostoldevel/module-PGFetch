@@ -27,7 +27,7 @@ Author:
 #include "PGFetch.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
-#define FETCH_TIMEOUT_INTERVAL 15000
+#define FETCH_TIMEOUT_INTERVAL 60000
 #define PG_CONFIG_NAME "helper"
 #define PG_LISTEN_NAME "http"
 #define PG_FETCH_HEADER_ATTACHE_FILE "x-attache-file"
@@ -38,28 +38,6 @@ extern "C++" {
 namespace Apostol {
 
     namespace Module {
-
-        CString PQQuoteLiteralJson(const CString &Json) {
-
-            if (Json.IsEmpty())
-                return "null";
-
-            CString Result;
-            TCHAR ch;
-
-            Result = "'";
-
-            for (size_t Index = 0; Index < Json.Size(); Index++) {
-                ch = Json.at(Index);
-                if (ch == '\'')
-                    Result.Append('\'');
-                Result.Append(ch);
-            }
-
-            Result << "'";
-
-            return Result;
-        }
 
         //--------------------------------------------------------------------------------------------------------------
 
@@ -171,6 +149,12 @@ namespace Apostol {
             m_Progress = 0;
             m_TimeOut = 0;
 
+            m_Client.AllocateEventHandlers(Server());
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+            m_Client.OnException([this](auto &&Sender, auto &&E) { DoCurlException(Sender, E); });
+#else
+            m_Client.OnException(std::bind(&CPGFetch::DoCurlException, this, _1, _2));
+#endif
             CPGFetch::InitMethods();
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -286,14 +270,13 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CPGFetch::DoError(const Delphi::Exception::Exception &E) {
-            Log()->Error(APP_LOG_ERR, 0, "[PGFetch] Error: %s", E.what());
+            Log()->Error(APP_LOG_ERR, 0, "[%s] Error: %s", ModuleName().c_str(), E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CPGFetch::DeleteHandler(CQueueHandler *AHandler) {
             auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
             if (Assigned(pHandler)) {
-                pHandler->Unlock();
                 CQueueCollection::DeleteHandler(AHandler);
             }
         }
@@ -306,7 +289,7 @@ namespace Apostol {
                 if (pSocket != nullptr) {
                     auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
-                        Log()->Notice(_T("[PGFetch] [%s:%d] Client connected."), pHandle->PeerIP(), pHandle->PeerPort());
+                        Log()->Notice(_T("[%s] [%s:%d] Client connected."), ModuleName().c_str(), pHandle->PeerIP(), pHandle->PeerPort());
                     }
                 }
             }
@@ -320,12 +303,17 @@ namespace Apostol {
                 if (pSocket != nullptr) {
                     auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
-                        Log()->Notice(_T("[PGFetch] [%s:%d] Client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
+                        Log()->Notice(_T("[%s] [%s:%d] Client disconnected."), ModuleName().c_str(), pHandle->PeerIP(), pHandle->PeerPort());
                     }
                 } else {
-                    Log()->Notice(_T("[PGFetch] Client disconnected."));
+                    Log()->Notice(_T("[%s] Client disconnected."), ModuleName().c_str());
                 }
             }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPGFetch::DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) {
+            DoError(E);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -527,7 +515,8 @@ namespace Apostol {
                         const auto& type = pHandler->Payload()["type"].AsString();
 
                         if (type == "curl") {
-                            DoThread(pHandler);
+                            DoCURL(pHandler);
+                            //DoThread(pHandler);
                         } else {
                             DoFetch(pHandler);
                         }
@@ -550,8 +539,6 @@ namespace Apostol {
 
             if (pHandler == nullptr)
                 return;
-
-            AHandler->Lock();
 
             CStringList SQL;
 
@@ -608,7 +595,7 @@ namespace Apostol {
                     }
                 }
 
-                DebugRequest(Request);
+                //DebugRequest(Request);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -616,11 +603,10 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto &Reply = pConnection->Reply();
 
-                DebugReply(Reply);
+                //DebugReply(Reply);
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
-                    pHandler->Unlock();
                     DoDone(pHandler, Reply);
                 }
 
@@ -634,7 +620,6 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
-                    pHandler->Unlock();
                     DoFail(pHandler, E.what());
                 }
 
@@ -647,9 +632,9 @@ namespace Apostol {
             if (pHandler == nullptr)
                 return;
 
-            pHandler->Lock();
             pHandler->Allow(false);
             pHandler->TimeOut(0);
+            AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
             pHandler->UpdateTimeOut(Now());
 
             const auto &caPayload = pHandler->Payload();
@@ -673,8 +658,87 @@ namespace Apostol {
                 pClient->AutoFree(true);
                 pClient->Active(true);
             } catch (std::exception &e) {
-                pHandler->Unlock();
                 DoFail(pHandler, e.what());
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CPGFetch::DoCURL(CFetchHandler *AHandler) {
+
+            auto OnDone = [this, AHandler](CCurlFetch *Sender, CURLcode code, const CString &Error) {
+                CHTTPReply Reply;
+                const auto http_code = Sender->GetResponseCode();
+
+                Reply.Headers.Clear();
+                for (int i = 1; i < Sender->Headers().Count(); i++) {
+                    const auto &Header = Sender->Headers()[i];
+                    Reply.AddHeader(Header.Name(), Header.Value());
+                }
+
+                Reply.StatusString = http_code;
+
+                Reply.StatusText = Reply.StatusString;
+                Reply.StringToStatus();
+
+                Reply.Content = Sender->Result();
+                Reply.ContentLength = Reply.Content.Length();
+
+                Reply.DelHeader("Transfer-Encoding");
+                Reply.DelHeader("Content-Encoding");
+                Reply.DelHeader("Content-Length");
+
+                Reply.AddHeader("Content-Length", CString::ToString(Reply.ContentLength));
+
+                DebugReply(Reply);
+
+                DoDone(AHandler, Reply);
+            };
+            //----------------------------------------------------------------------------------------------------------
+
+            auto OnFail = [this, AHandler](CCurlFetch *Sender, CURLcode code, const CString &Error) {
+                Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, Error.c_str());
+                DoFail(AHandler, Error);
+            };
+            //----------------------------------------------------------------------------------------------------------
+
+            CHeaders Headers;
+            CString Content;
+
+            AHandler->Allow(false);
+            AHandler->TimeOut(0);
+            AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
+            AHandler->UpdateTimeOut(Now());
+
+            const auto &caPayload = AHandler->Payload();
+
+            CLocation URI(caPayload["resource"].AsString());
+
+            const auto &caMethod = caPayload["method"].AsString();
+            const auto &caHeaders = caPayload["headers"];
+            const auto &caContent = caPayload["content"];
+
+            if (caMethod == "PUT" && caHeaders.HasOwnProperty(PG_FETCH_HEADER_ATTACHE_FILE)) {
+                const auto &caAttacheFile = caHeaders[PG_FETCH_HEADER_ATTACHE_FILE].AsString();
+                if (FileExists(caAttacheFile.c_str())) {
+                    Content.LoadFromFile(caAttacheFile);
+                }
+            } else {
+                if (!caContent.IsNull()) {
+                    Content = base64_decode(caContent.AsString());
+                }
+            }
+
+            for (int i = 0; i < caHeaders.Count(); i++) {
+                const auto &caHeader = caHeaders.Members(i);
+                if (caHeader.String() != PG_FETCH_HEADER_ATTACHE_FILE) {
+                    Headers.Values(caHeader.String(), caHeader.Value().AsString());
+                }
+            }
+
+            try {
+                m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
+            } catch (std::exception &e) {
+                DoFail(AHandler, e.what());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -706,7 +770,7 @@ namespace Apostol {
 
             curl.TimeOut(m_TimeOut);
 
-            const auto code = curl.Send(URI, method, content, Headers, false);
+            const auto code = curl.Send(URI, method, content, Headers);
 
             if (code == CURLE_OK) {
                 CHTTPReply Reply;
@@ -880,7 +944,7 @@ namespace Apostol {
                 }
             };
 
-            auto OnException = [](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 DoError(E);
             };
 
@@ -955,6 +1019,7 @@ namespace Apostol {
         void CPGFetch::Initialization(CModuleProcess *AProcess) {
             CApostolModule::Initialization(AProcess);
             m_TimeOut = Config()->IniFile().ReadInteger(SectionName().c_str(), "timeout", 0);
+            m_Client.TimeOut(m_TimeOut);
         }
         //--------------------------------------------------------------------------------------------------------------
 
