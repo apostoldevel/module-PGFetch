@@ -52,86 +52,6 @@ namespace Apostol {
             m_TimeOutInterval = FETCH_TIMEOUT_INTERVAL;
 
             m_RequestId = RequestId;
-
-            m_pThread = nullptr;
-        }
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        //-- CFetchThread ----------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThread::CFetchThread(CPGFetch *AFetch, CFetchHandler *AHandler, CFetchThreadMgr *AThreadMgr):
-                CThread(true), CGlobalComponent() {
-
-            m_pFetch = AFetch;
-            m_pHandler = AHandler;
-            m_pThreadMgr = AThreadMgr;
-
-            if (Assigned(m_pHandler))
-                m_pHandler->SetThread(this);
-
-            if (Assigned(m_pThreadMgr))
-                m_pThreadMgr->ActiveThreads().Add(this);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThread::~CFetchThread() {
-            if (Assigned(m_pHandler)) {
-                m_pHandler->SetThread(nullptr);
-                m_pHandler = nullptr;
-            }
-
-            if (Assigned(m_pThreadMgr))
-                m_pThreadMgr->ActiveThreads().Remove(this);
-
-            m_pThreadMgr = nullptr;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchThread::TerminateAndWaitFor() {
-            if (FreeOnTerminate())
-                throw Delphi::Exception::Exception(_T("Cannot call TerminateAndWaitFor on FreeAndTerminate threads."));
-
-            Terminate();
-            if (Suspended())
-                Resume();
-
-            WaitFor();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchThread::Execute() {
-            m_pFetch->CURL(m_pHandler);
-        }
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        //-- CFetchThreadMgr -------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThreadMgr::CFetchThreadMgr() {
-            m_ThreadPriority = tpNormal;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThreadMgr::~CFetchThreadMgr() {
-            TerminateThreads();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThread *CFetchThreadMgr::GetThread(CPGFetch *AFetch, CFetchHandler *AHandler) {
-            return new CFetchThread(AFetch, AHandler, this);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CFetchThreadMgr::TerminateThreads() {
-            while (m_ActiveThreads.List().Count() > 0) {
-                auto pThread = static_cast<CFetchThread *> (m_ActiveThreads.List().Last());
-                ReleaseThread(pThread);
-            }
         }
 
         //--------------------------------------------------------------------------------------------------------------
@@ -595,7 +515,7 @@ namespace Apostol {
                     }
                 }
 
-                //DebugRequest(Request);
+                DebugRequest(Request);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -603,7 +523,7 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto &Reply = pConnection->Reply();
 
-                //DebugReply(Reply);
+                DebugReply(Reply);
 
                 auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
@@ -633,9 +553,12 @@ namespace Apostol {
                 return;
 
             pHandler->Allow(false);
-            pHandler->TimeOut(0);
-            AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
-            pHandler->UpdateTimeOut(Now());
+
+            if (m_TimeOut > 0) {
+                pHandler->TimeOut(0);
+                AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
+                pHandler->UpdateTimeOut(Now());
+            }
 
             const auto &caPayload = pHandler->Payload();
 
@@ -689,14 +612,12 @@ namespace Apostol {
 
                 Reply.AddHeader("Content-Length", CString::ToString(Reply.ContentLength));
 
-                DebugReply(Reply);
-
                 DoDone(AHandler, Reply);
             };
             //----------------------------------------------------------------------------------------------------------
 
             auto OnFail = [this, AHandler](CCurlFetch *Sender, CURLcode code, const CString &Error) {
-                Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, Error.c_str());
+                Log()->Warning("[%s] [CURL] %d (%s)", ModuleName().c_str(), (int) code, Error.c_str());
                 DoFail(AHandler, Error);
             };
             //----------------------------------------------------------------------------------------------------------
@@ -705,9 +626,12 @@ namespace Apostol {
             CString Content;
 
             AHandler->Allow(false);
-            AHandler->TimeOut(0);
-            AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
-            AHandler->UpdateTimeOut(Now());
+
+            if (m_TimeOut > 0) {
+                AHandler->TimeOut(0);
+                AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
+                AHandler->UpdateTimeOut(Now());
+            }
 
             const auto &caPayload = AHandler->Payload();
 
@@ -737,86 +661,6 @@ namespace Apostol {
 
             try {
                 m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
-            } catch (std::exception &e) {
-                DoFail(AHandler, e.what());
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::CURL(CFetchHandler *AHandler) {
-
-            if (AHandler == nullptr)
-                return;
-
-            CCurlFetch curl;
-            CHeaders Headers;
-
-            AHandler->Lock();
-
-            const auto &caPayload = AHandler->Payload();
-
-            const auto &method = caPayload["method"].AsString();
-
-            const auto &caHeaders = caPayload["headers"];
-
-            for (int i = 0; i < caHeaders.Count(); i++) {
-                const auto &caHeader = caHeaders.Members(i);
-                Headers.AddPair(caHeader.String(), caHeader.Value().AsString());
-            }
-
-            const auto &content = base64_decode(caPayload["content"].AsString());
-
-            CLocation URI(caPayload["resource"].AsString());
-
-            curl.TimeOut(m_TimeOut);
-
-            const auto code = curl.Send(URI, method, content, Headers);
-
-            if (code == CURLE_OK) {
-                CHTTPReply Reply;
-                const auto http_code = curl.GetResponseCode();
-
-                Reply.Headers.Clear();
-                for (int i = 1; i < curl.Headers().Count(); i++) {
-                    const auto &Header = curl.Headers()[i];
-                    Reply.AddHeader(Header.Name(), Header.Value());
-                }
-
-                Reply.StatusString = http_code;
-
-                Reply.StatusText = Reply.StatusString;
-                Reply.StringToStatus();
-
-                Reply.Content = curl.Result();
-                Reply.ContentLength = Reply.Content.Length();
-
-                Reply.DelHeader("Transfer-Encoding");
-                Reply.DelHeader("Content-Encoding");
-                Reply.DelHeader("Content-Length");
-
-                Reply.AddHeader("Content-Length", CString::ToString(Reply.ContentLength));
-
-                DebugReply(Reply);
-
-                AHandler->Unlock();
-                DoDone(AHandler, Reply);
-            } else {
-                const auto &error = CCurlFetch::GetErrorMessage(code);
-
-                Log()->Error(APP_LOG_NOTICE, 0, "[CURL] %d (%s)", (int) code, error.c_str());
-
-                AHandler->Unlock();
-                DoFail(AHandler, error);
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoThread(CFetchHandler *AHandler) {
-            try {
-                auto pThread = GetThread(AHandler);
-
-                pThread->FreeOnTerminate(true);
-                pThread->Resume();
             } catch (std::exception &e) {
                 DoFail(AHandler, e.what());
             }
@@ -997,11 +841,6 @@ namespace Apostol {
                     }
                 }
             }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        CFetchThread *CPGFetch::GetThread(CFetchHandler *AHandler) {
-            return m_ThreadMgr.GetThread(this, AHandler);
         }
         //--------------------------------------------------------------------------------------------------------------
 
