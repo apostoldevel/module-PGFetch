@@ -380,7 +380,7 @@ namespace Apostol {
         void CPGFetch::Heartbeat(CDateTime DateTime) {
             CApostolModule::Heartbeat(DateTime);
             if (DateTime >= m_CheckDate) {
-                m_CheckDate = DateTime + (CDateTime) 1 / MinsPerDay; // 1 min
+                m_CheckDate = DateTime + (CDateTime) 30 / SecsPerDay; // 30 sec
                 CheckListen();
             }
             UnloadQueue();
