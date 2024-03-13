@@ -204,6 +204,11 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
+            auto OnWrite = [this, AHandler](CCurlApi *Sender, LPCTSTR buffer, size_t size) {
+                DoStream(AHandler, CString(buffer, size));
+            };
+            //----------------------------------------------------------------------------------------------------------
+
             CHeaders Headers;
             CString Content;
 
@@ -242,7 +247,11 @@ namespace Apostol {
             }
 
             try {
-                m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
+                if (caPayload.HasOwnProperty("stream")) {
+                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail, OnWrite);
+                } else {
+                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
+                };
             } catch (std::exception &e) {
                 DoFail(AHandler, e.what());
             }
