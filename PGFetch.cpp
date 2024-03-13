@@ -227,6 +227,7 @@ namespace Apostol {
             const auto &caMethod = caPayload["method"].AsString();
             const auto &caHeaders = caPayload["headers"];
             const auto &caContent = caPayload["content"];
+            const auto &caStream = caPayload["stream"];
 
             if (caMethod == "PUT" && caHeaders.HasOwnProperty(PG_FETCH_HEADER_ATTACHE_FILE)) {
                 const auto &caAttacheFile = caHeaders[PG_FETCH_HEADER_ATTACHE_FILE].AsString();
@@ -247,10 +248,10 @@ namespace Apostol {
             }
 
             try {
-                if (caPayload.HasOwnProperty("stream")) {
-                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail, OnWrite);
-                } else {
+                if (caStream.IsNull()) {
                     m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
+                } else {
+                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail, OnWrite);
                 };
             } catch (std::exception &e) {
                 DoFail(AHandler, e.what());
