@@ -151,8 +151,8 @@ namespace Apostol {
             pClient->OnConnected([this](auto &&Sender) { DoConnected(Sender); });
             pClient->OnDisconnected([this](auto &&Sender) { DoDisconnected(Sender); });
 #else
-            pClient->OnConnected(std::bind(&CFetchCommon::DoConnected, this, _1));
-            pClient->OnDisconnected(std::bind(&CFetchCommon::DoDisconnected, this, _1));
+            pClient->OnConnected(std::bind(&CPGFetch::DoConnected, this, _1));
+            pClient->OnDisconnected(std::bind(&CPGFetch::DoDisconnected, this, _1));
 #endif
 
             pClient->OnRequest(OnRequest);
