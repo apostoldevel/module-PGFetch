@@ -59,7 +59,7 @@ namespace Apostol {
 
             void DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) override;
 
-            void DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E);
+            void DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) const;
 
         public:
 

@@ -56,7 +56,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CPGFetch::DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) {
+        void CPGFetch::DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) const {
             DoError(E);
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -64,7 +64,7 @@ namespace Apostol {
         void CPGFetch::DoFetch(CQueueHandler *AHandler) {
 
             auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest &Request) {
-                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
                 if (Assigned(pHandler)) {
                     const auto &caPayload = pHandler->Payload();
@@ -85,7 +85,7 @@ namespace Apostol {
                         }
                     }
 
-                    CLocation URI(caPayload["resource"].AsString());
+                    const CLocation URI(caPayload["resource"].AsString());
 
                     CHTTPRequest::Prepare(Request, caMethod.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
 
@@ -102,12 +102,12 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto &Reply = pConnection->Reply();
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto &Reply = pConnection->Reply();
 
                 DebugReply(Reply);
 
-                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
                     DoDone(pHandler, Reply);
                 }
@@ -117,10 +117,10 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnException = [this, AHandler](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 DebugReply(pConnection->Reply());
 
-                auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
                 if (Assigned(pHandler)) {
                     DoFail(pHandler, E.what());
                 }
@@ -129,7 +129,7 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+            const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
             if (pHandler == nullptr)
                 return;
@@ -138,13 +138,13 @@ namespace Apostol {
 
             if (m_TimeOut > 0) {
                 pHandler->TimeOut(0);
-                AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
+                pHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
                 pHandler->UpdateTimeOut(Now());
             }
 
             const auto &caPayload = pHandler->Payload();
 
-            CLocation URI(caPayload["resource"].AsString());
+            const CLocation URI(caPayload["resource"].AsString());
 
             auto pClient = GetClient(URI.hostname, URI.port);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
@@ -262,7 +262,7 @@ namespace Apostol {
         void CPGFetch::DoQuery(CQueueHandler *AHandler) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
 
                 if (pHandler == nullptr)
                     return;
@@ -272,10 +272,9 @@ namespace Apostol {
                     return;
                 }
 
-                CPQResult *pResult;
                 try {
                     for (int i = 0; i < APollQuery->Count(); i++) {
-                        pResult = APollQuery->Results(i);
+                        const auto pResult = APollQuery->Results(i);
 
                         if (pResult->ExecStatus() != PGRES_TUPLES_OK)
                             throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
@@ -299,14 +298,14 @@ namespace Apostol {
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
                 if (Assigned(pHandler)) {
                     DeleteHandler(pHandler);
                 }
                 DoError(E);
             };
 
-            auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
+            const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
 
             if (pHandler == nullptr)
                 return;
@@ -348,7 +347,7 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 try {
-                    auto pResult = APollQuery->Results(0);
+                    const auto pResult = APollQuery->Results(0);
 
                     if (pResult->ExecStatus() != PGRES_COMMAND_OK) {
                         throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
@@ -356,7 +355,7 @@ namespace Apostol {
 
                     APollQuery->Connection()->Listeners().Add(PG_LISTEN_NAME);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                    APollQuery->Connection()->OnNotify([this](auto && APollQuery, auto && ANotify) { DoPostgresNotify(APollQuery, ANotify); });
+                    APollQuery->Connection()->OnNotify([this](auto && AConnection, auto && ANotify) { DoPostgresNotify(AConnection, ANotify); });
 #else
                     APollQuery->Connection()->OnNotify(std::bind(&CPGFetch::DoPostgresNotify, this, _1, _2));
 #endif
