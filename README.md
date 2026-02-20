@@ -81,7 +81,7 @@ Follow the instructions for installing PostgreSQL in the description of [Apostol
 Module installation
 -
 
-Follow the instructions for building and installing [Apostol](https://github.com/apostoldevel/apostol#%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0).
+Follow the instructions for building and installing [Apostol](https://github.com/apostoldevel/apostol#build-and-installation).
 
 Function Parameters
 -
