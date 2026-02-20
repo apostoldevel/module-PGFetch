@@ -75,6 +75,30 @@ $$ LANGUAGE plpgsql
   SET search_path = http, pg_temp;
 ~~~
 
+Модуль базы данных
+-
+
+PGFetch тесно связан с модулем **`http`** платформы [db-platform](https://github.com/apostoldevel/db-platform) (`db/sql/platform/http/`).
+
+Исходящие запросы и их результаты хранятся исключительно в этом модуле:
+
+| Объект | Назначение |
+|--------|------------|
+| `http.request` | Очередь исходящих HTTP-запросов; PGFetch опрашивает эту таблицу и отправляет каждую ожидающую запись |
+| `http.response` | Хранит HTTP-ответ (статус, заголовки, тело) для каждого завершённого запроса |
+| `http.fetch` (представление) | Объединение `http.request` + `http.response` для удобного просмотра пар запрос/ответ |
+| `http.fetch(resource, ...)` | PL/pgSQL-функция, добавляющая новый исходящий запрос в очередь и возвращающая его `uuid` |
+
+> **Примечание:** PGFetch обрабатывает **исходящие** HTTP-запросы, инициируемые из PL/pgSQL через `http.fetch()`. Для **входящих** HTTP-запросов, диспетчеризуемых в PL/pgSQL, используйте [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — оба модуля разделяют один и тот же модуль `http` платформы db-platform.
+
+Настройка
+-
+
+```ini
+[helper/PGFetch]
+enable=true
+```
+
 Установка базы данных
 -
 Следуйте указаниям по установке PostgreSQL в описании [Апостол](https://github.com/apostoldevel/apostol#postgresql)
