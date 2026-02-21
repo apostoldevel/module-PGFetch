@@ -3,7 +3,7 @@
 Postgres Fetch
 -
 
-**PGFetch** - a module for [Apostol](https://github.com/apostoldevel/apostol).
+**PGFetch** - a module for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Description
 -

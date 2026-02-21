@@ -2,7 +2,7 @@
 
 Postgres Fetch
 -
-**PGFetch** - модуль для [Апостол](https://github.com/apostoldevel/apostol).
+**PGFetch** - модуль для [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Описание
 -
@@ -146,3 +146,5 @@ CREATE OR REPLACE FUNCTION http.fetch (
   data          jsonb DEFAULT null
 ) RETURNS       uuid
 ~~~
+
+[^crm]: **Apostol CRM** — абстрактный термин, а не самостоятельный продукт. Он обозначает любой проект, в котором совместно используются фреймворк [Apostol](https://github.com/apostoldevel/apostol) (C++) и [db-platform](https://github.com/apostoldevel/db-platform) через специально разработанные модули и процессы. Каждый фреймворк можно использовать независимо; вместе они образуют полноценную backend-платформу.
