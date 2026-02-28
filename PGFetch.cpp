@@ -85,8 +85,14 @@ void PGFetch::process_queue()
 
 void PGFetch::do_query(std::shared_ptr<FetchTask> task)
 {
-    auto sql = fmt::format("SELECT * FROM http.request({}::uuid)",
-                           pq_quote_literal(task->id));
+    auto sql = fmt::format(
+        "SELECT row_to_json(t)::text FROM ("
+        "  SELECT id, type, method, resource, headers,"
+        "         convert_from(content, 'UTF-8') AS content,"
+        "         done, fail, agent, profile, command, message, data"
+        "  FROM http.request({}::uuid)"
+        ") t",
+        pq_quote_literal(task->id));
 
     pool_.execute(sql,
         // on_result
