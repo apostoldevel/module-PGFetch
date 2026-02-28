@@ -1,416 +1,243 @@
-/*++
+#ifdef WITH_POSTGRESQL
 
-Program name:
-
-  Apostol CRM
-
-Module Name:
-
-  PGFetch.cpp
-
-Notices:
-
-  Module: Postgres Fetch
-
-Author:
-
-  Copyright (c) Prepodobny Alen
-
-  mailto: alienufo@inbox.ru
-  mailto: ufocomp@gmail.com
-
---*/
-
-//----------------------------------------------------------------------------------------------------------------------
-
-#include "Core.hpp"
 #include "PGFetch.hpp"
-//----------------------------------------------------------------------------------------------------------------------
+#include "apostol/application.hpp"
 
-#define PG_CONFIG_NAME "helper"
-#define PG_LISTEN_NAME "http"
-#define PG_FETCH_HEADER_ATTACHE_FILE "x-attache-file"
-//----------------------------------------------------------------------------------------------------------------------
+#include "apostol/pg_utils.hpp"
 
-extern "C++" {
+#include <fmt/format.h>
 
-namespace Apostol {
+namespace apostol
+{
 
-    namespace Module {
+// ─── Construction ───────────────────────────────────────────────────────────
 
-        //--------------------------------------------------------------------------------------------------------------
+PGFetch::PGFetch(Application& app, EventLoop& loop)
+    : pool_(app.db_pool())
+    , fetch_(loop)
+    , timeout_ms_(0)
+    , enabled_(true)
+{
+    if (auto* cfg = app.module_config("PGFetch")) {
+        if (cfg->contains("timeout") && (*cfg)["timeout"].is_number())
+            timeout_ms_ = (*cfg)["timeout"].get<long>() * 1000;
+    }
+    if (timeout_ms_ > 0)
+        fetch_.set_timeout(timeout_ms_);
+}
 
-        //-- CPGFetch --------------------------------------------------------------------------------------------------
+// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
-        //--------------------------------------------------------------------------------------------------------------
+void PGFetch::on_start()
+{
+    pool_.listen("http", [this](std::string_view ch, std::string_view payload) {
+        on_notify(ch, payload);
+    });
+}
 
-        CPGFetch::CPGFetch(CModuleProcess *AProcess): CFetchCommon(AProcess, "pg fetch", "module/PGFetch") {
-            m_CheckDate = 0;
+void PGFetch::on_stop()
+{
+    pool_.unlisten("http");
+}
 
-            m_Client.AllocateEventHandlers(Server());
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            m_Client.OnException([this](auto &&Sender, auto &&E) { DoCurlException(Sender, E); });
-#else
-            m_Client.OnException(std::bind(&CPGFetch::DoCurlException, this, _1, _2));
-#endif
+// ─── on_notify ──────────────────────────────────────────────────────────────
+
+void PGFetch::on_notify(std::string_view /*channel*/, std::string_view payload)
+{
+    // Payload is the request_id (UUID string)
+    if (payload.empty())
+        return;
+
+    auto task = std::make_shared<FetchTask>();
+    task->id = std::string(payload);
+
+    // Set deadline: timeout + 10s grace (mirrors v1 pattern)
+    long effective_timeout = timeout_ms_ > 0 ? timeout_ms_ + 10000 : 60000;
+    task->deadline = std::chrono::steady_clock::now()
+                   + std::chrono::milliseconds(effective_timeout);
+
+    queue_.push_back(std::move(task));
+}
+
+// ─── heartbeat ──────────────────────────────────────────────────────────────
+
+void PGFetch::heartbeat(std::chrono::system_clock::time_point /*now*/)
+{
+    auto now_steady = std::chrono::steady_clock::now();
+
+    process_queue();
+    check_timeouts(now_steady);
+}
+
+// ─── process_queue ──────────────────────────────────────────────────────────
+
+void PGFetch::process_queue()
+{
+    for (auto& task : queue_) {
+        if (!task->in_progress) {
+            task->in_progress = true;
+            do_query(task);
         }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) const {
-            DoError(E);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoFetch(CQueueHandler *AHandler) {
-
-            auto OnRequest = [AHandler](CHTTPClient *Sender, CHTTPRequest &Request) {
-                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-
-                if (Assigned(pHandler)) {
-                    const auto &caPayload = pHandler->Payload();
-
-                    const auto &caMethod = caPayload["method"].AsString();
-                    const auto &caHeaders = caPayload["headers"];
-                    const auto &caContentType = caHeaders["Content-Type"];
-                    const auto &caContent = caPayload["content"];
-
-                    if (caMethod == "PUT" && caHeaders.HasOwnProperty(PG_FETCH_HEADER_ATTACHE_FILE)) {
-                        const auto &caAttacheFile = caHeaders[PG_FETCH_HEADER_ATTACHE_FILE].AsString();
-                        if (FileExists(caAttacheFile.c_str())) {
-                            Request.Content.LoadFromFile(caAttacheFile);
-                        }
-                    } else {
-                        if (!caContent.IsNull()) {
-                            Request.Content = base64_decode(caContent.AsString());
-                        }
-                    }
-
-                    const CLocation URI(caPayload["resource"].AsString());
-
-                    CHTTPRequest::Prepare(Request, caMethod.c_str(), URI.href().c_str(), caContentType.IsNull() ? _T("application/json") : caContentType.AsString().c_str());
-
-                    for (int i = 0; i < caHeaders.Count(); i++) {
-                        const auto &caHeader = caHeaders.Members(i);
-                        if (caHeader.String() != PG_FETCH_HEADER_ATTACHE_FILE) {
-                            Request.Headers.Values(caHeader.String(), caHeader.Value().AsString());
-                        }
-                    }
-                }
-
-                DebugRequest(Request);
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            auto OnExecute = [this, AHandler](CTCPConnection *Sender) {
-                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                const auto &Reply = pConnection->Reply();
-
-                DebugReply(Reply);
-
-                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-                if (Assigned(pHandler)) {
-                    DoDone(pHandler, Reply);
-                }
-
-                return true;
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            auto OnException = [this, AHandler](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
-                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                DebugReply(pConnection->Reply());
-
-                const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-                if (Assigned(pHandler)) {
-                    DoFail(pHandler, E.what());
-                }
-
-                DoError(E);
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-
-            if (pHandler == nullptr)
-                return;
-
-            pHandler->Allow(false);
-
-            if (m_TimeOut > 0) {
-                pHandler->TimeOut(0);
-                pHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
-                pHandler->UpdateTimeOut(Now());
-            }
-
-            const auto &caPayload = pHandler->Payload();
-
-            const CLocation URI(caPayload["resource"].AsString());
-
-            auto pClient = GetClient(URI.hostname, URI.port);
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            pClient->OnConnected([this](auto &&Sender) { DoConnected(Sender); });
-            pClient->OnDisconnected([this](auto &&Sender) { DoDisconnected(Sender); });
-#else
-            pClient->OnConnected(std::bind(&CPGFetch::DoConnected, this, _1));
-            pClient->OnDisconnected(std::bind(&CPGFetch::DoDisconnected, this, _1));
-#endif
-
-            pClient->OnRequest(OnRequest);
-            pClient->OnExecute(OnExecute);
-            pClient->OnException(OnException);
-
-            try {
-                pClient->AutoFree(true);
-                pClient->Active(true);
-            } catch (std::exception &e) {
-                DoFail(pHandler, e.what());
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoCURL(CFetchHandler *AHandler) {
-
-            auto OnDone = [this, AHandler](CCurlFetch *Sender, CURLcode code, const CString &Error) {
-                CHTTPReply Reply;
-                const auto http_code = Sender->GetResponseCode();
-
-                Reply.Headers.Clear();
-                for (int i = 1; i < Sender->Headers().Count(); i++) {
-                    const auto &Header = Sender->Headers()[i];
-                    Reply.AddHeader(Header.Name(), Header.Value());
-                }
-
-                Reply.StatusString = http_code;
-
-                Reply.StatusText = Reply.StatusString;
-                Reply.StringToStatus();
-
-                Reply.Content = Sender->Result();
-                Reply.ContentLength = Reply.Content.Length();
-
-                Reply.DelHeader("Transfer-Encoding");
-                Reply.DelHeader("Content-Encoding");
-                Reply.DelHeader("Content-Length");
-
-                Reply.AddHeader("Content-Length", CString::ToString(Reply.ContentLength));
-
-                DoDone(AHandler, Reply);
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            auto OnFail = [this, AHandler](CCurlFetch *Sender, CURLcode code, const CString &Error) {
-                Log()->Warning("[%s] [CURL] %d (%s)", ModuleName().c_str(), (int) code, Error.c_str());
-                DoFail(AHandler, Error);
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            auto OnWrite = [this, AHandler](CCurlApi *Sender, LPCTSTR buffer, size_t size) {
-                DoStream(AHandler, CString(buffer, size));
-            };
-            //----------------------------------------------------------------------------------------------------------
-
-            CHeaders Headers;
-            CString Content;
-
-            AHandler->Allow(false);
-
-            if (m_TimeOut > 0) {
-                AHandler->TimeOut(0);
-                AHandler->TimeOutInterval((m_TimeOut + 10) * 1000);
-                AHandler->UpdateTimeOut(Now());
-            }
-
-            const auto &caPayload = AHandler->Payload();
-
-            CLocation URI(caPayload["resource"].AsString());
-
-            const auto &caMethod = caPayload["method"].AsString();
-            const auto &caHeaders = caPayload["headers"];
-            const auto &caContent = caPayload["content"];
-            const auto &caStream = caPayload["stream"];
-
-            if (caMethod == "PUT" && caHeaders.HasOwnProperty(PG_FETCH_HEADER_ATTACHE_FILE)) {
-                const auto &caAttacheFile = caHeaders[PG_FETCH_HEADER_ATTACHE_FILE].AsString();
-                if (FileExists(caAttacheFile.c_str())) {
-                    Content.LoadFromFile(caAttacheFile);
-                }
-            } else {
-                if (!caContent.IsNull()) {
-                    Content = base64_decode(caContent.AsString());
-                }
-            }
-
-            for (int i = 0; i < caHeaders.Count(); i++) {
-                const auto &caHeader = caHeaders.Members(i);
-                if (caHeader.String() != PG_FETCH_HEADER_ATTACHE_FILE) {
-                    Headers.Values(caHeader.String(), caHeader.Value().AsString());
-                }
-            }
-
-            try {
-                if (caStream.IsNull()) {
-                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail);
-                } else {
-                    m_Client.Perform(URI, caMethod, Content, Headers, OnDone, OnFail, OnWrite);
-                };
-            } catch (std::exception &e) {
-                DoFail(AHandler, e.what());
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoQuery(CQueueHandler *AHandler) {
-
-            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                const auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
-
-                if (pHandler == nullptr)
-                    return;
-
-                if (APollQuery->Count() == 0) {
-                    DeleteHandler(pHandler);
-                    return;
-                }
-
-                try {
-                    for (int i = 0; i < APollQuery->Count(); i++) {
-                        const auto pResult = APollQuery->Results(i);
-
-                        if (pResult->ExecStatus() != PGRES_TUPLES_OK)
-                            throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
-
-                        CString Json;
-                        Postgres::PQResultToJson(pResult, Json);
-
-                        pHandler->Payload() = Json;
-                        const auto& type = pHandler->Payload()["type"].AsString();
-
-                        if (type == "curl") {
-                            DoCURL(pHandler);
-                        } else {
-                            DoFetch(pHandler);
-                        }
-                    }
-                } catch (Delphi::Exception::Exception &E) {
-                    DeleteHandler(pHandler);
-                    DoError(E);
-                }
-            };
-
-            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                const auto pHandler = dynamic_cast<CFetchHandler *> (APollQuery->Binding());
-                if (Assigned(pHandler)) {
-                    DeleteHandler(pHandler);
-                }
-                DoError(E);
-            };
-
-            const auto pHandler = dynamic_cast<CFetchHandler *> (AHandler);
-
-            if (pHandler == nullptr)
-                return;
-
-            CStringList SQL;
-
-            SQL.Add(CString().Format("SELECT * FROM http.request(%s::uuid);",
-                                     PQQuoteLiteral(pHandler->RequestId()).c_str()
-            ));
-
-            try {
-                ExecSQL(SQL, AHandler, OnExecuted, OnException);
-
-                AHandler->Allow(false);
-
-                IncProgress();
-            } catch (Delphi::Exception::Exception &E) {
-                DeleteHandler(AHandler);
-                DoError(E);
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
-            DebugNotify(AConnection, ANotify);
-
-            if (CompareString(ANotify->relname, PG_LISTEN_NAME) == 0) {
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                new CFetchHandler(this, ANotify->extra, [this](auto &&Handler) { DoQuery(Handler); });
-#else
-                new CFetchHandler(this, ANotify->extra, std::bind(&CPGFetch::DoQuery, this, _1));
-#endif
-                UnloadQueue();
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::InitListen() {
-
-            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                try {
-                    const auto pResult = APollQuery->Results(0);
-
-                    if (pResult->ExecStatus() != PGRES_COMMAND_OK) {
-                        throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
-                    }
-
-                    APollQuery->Connection()->Listeners().Add(PG_LISTEN_NAME);
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                    APollQuery->Connection()->OnNotify([this](auto && AConnection, auto && ANotify) { DoPostgresNotify(AConnection, ANotify); });
-#else
-                    APollQuery->Connection()->OnNotify(std::bind(&CPGFetch::DoPostgresNotify, this, _1, _2));
-#endif
-                } catch (Delphi::Exception::Exception &E) {
-                    DoError(E);
-                }
-            };
-
-            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                DoError(E);
-            };
-
-            CStringList SQL;
-
-            SQL.Add("LISTEN " PG_LISTEN_NAME ";");
-
-            try {
-                ExecSQL(SQL, nullptr, OnExecuted, OnException, PG_CONFIG_NAME);
-            } catch (Delphi::Exception::Exception &E) {
-                DoError(E);
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::CheckListen() {
-            if (!PQClient(PG_CONFIG_NAME).CheckListen(PG_LISTEN_NAME))
-                InitListen();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::Heartbeat(CDateTime DateTime) {
-            CApostolModule::Heartbeat(DateTime);
-            if (DateTime >= m_CheckDate) {
-                m_CheckDate = DateTime + (CDateTime) 30 / SecsPerDay; // 30 sec
-                CheckListen();
-            }
-            UnloadQueue();
-            CheckTimeOut(DateTime);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CPGFetch::Initialization(CModuleProcess *AProcess) {
-            CFetchCommon::Initialization(AProcess);
-            m_TimeOut = Config()->IniFile().ReadInteger(SectionName().c_str(), "timeout", 0);
-            m_Client.TimeOut(m_TimeOut);
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        bool CPGFetch::Enabled() {
-            if (m_ModuleStatus == msUnknown)
-                m_ModuleStatus = Config()->IniFile().ReadBool(SectionName().c_str(), "enable", true) ? msEnabled : msDisabled;
-            return m_ModuleStatus == msEnabled;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
     }
 }
+
+// ─── do_query ───────────────────────────────────────────────────────────────
+
+void PGFetch::do_query(std::shared_ptr<FetchTask> task)
+{
+    auto sql = fmt::format("SELECT * FROM http.request({}::uuid)",
+                           pq_quote_literal(task->id));
+
+    pool_.execute(sql,
+        // on_result
+        [this, task](std::vector<PgResult> results) {
+            if (results.empty() || !results[0].ok() ||
+                results[0].rows() == 0 || results[0].columns() == 0) {
+                do_fail(task, "http.request() returned empty result");
+                return;
+            }
+
+            // Parse the JSON payload from PG
+            const char* val = results[0].value(0, 0);
+            if (!val || val[0] == '\0') {
+                do_fail(task, "http.request() returned null");
+                return;
+            }
+
+            try {
+                task->payload = nlohmann::json::parse(val);
+            } catch (const nlohmann::json::parse_error& e) {
+                do_fail(task, fmt::format("JSON parse error: {}", e.what()));
+                return;
+            }
+
+            do_curl(task);
+        },
+        // on_exception
+        [this, task](std::string_view error) {
+            do_fail(task, fmt::format("PG error: {}", error));
+        });
 }
+
+// ─── do_curl ────────────────────────────────────────────────────────────────
+
+void PGFetch::do_curl(std::shared_ptr<FetchTask> task)
+{
+    const auto& p = task->payload;
+
+    // Extract fields from payload JSON
+    std::string url    = p.value("resource", "");
+    std::string method = p.value("method", "GET");
+
+    if (url.empty()) {
+        do_fail(task, "empty resource URL");
+        return;
+    }
+
+    // Request headers
+    std::vector<std::pair<std::string, std::string>> headers;
+    if (p.contains("headers") && p["headers"].is_object()) {
+        for (auto& [k, v] : p["headers"].items()) {
+            if (v.is_string())
+                headers.emplace_back(k, v.get<std::string>());
+        }
+    }
+
+    // Request body (may be base64-encoded in payload)
+    std::string content;
+    if (p.contains("content") && p["content"].is_string()) {
+        content = p["content"].get<std::string>();
+    }
+
+    fetch_.request(method, url, content, headers,
+        // on_done
+        [this, task](FetchResponse resp) {
+            do_done(task, resp);
+        },
+        // on_error
+        [this, task](std::string_view error) {
+            do_fail(task, fmt::format("fetch error: {}", error));
+        });
+}
+
+// ─── do_done ────────────────────────────────────────────────────────────────
+
+void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp)
+{
+    // Build response headers JSON
+    auto resp_headers_json = headers_to_json(resp.headers);
+
+    // Store response via http.create_response(id, status, status_text, headers, body)
+    auto sql = fmt::format(
+        "SELECT http.create_response({}, {}, {}, {}::jsonb, {})",
+        pq_quote_literal(task->id),
+        resp.status_code,
+        pq_quote_literal(std::string(status_text(
+            static_cast<HttpStatus>(resp.status_code)))),
+        pq_quote_literal(resp_headers_json),
+        pq_quote_literal(resp.body));
+
+    pool_.execute(sql,
+        [this, task](std::vector<PgResult> /*results*/) {
+            remove_task(task->id);
+        },
+        [this, task](std::string_view /*error*/) {
+            // Best effort — remove task even if storing response failed
+            remove_task(task->id);
+        });
+}
+
+// ─── do_fail ────────────────────────────────────────────────────────────────
+
+void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
+{
+    // Check if there's a custom fail function in the payload
+    std::string fail_func;
+    if (task->payload.contains("fail") && task->payload["fail"].is_string())
+        fail_func = task->payload["fail"].get<std::string>();
+
+    std::string sql;
+    if (!fail_func.empty()) {
+        sql = fmt::format("SELECT {}({}, {})",
+                          fail_func,
+                          pq_quote_literal(task->id),
+                          pq_quote_literal(std::string(message)));
+    } else {
+        sql = fmt::format("SELECT http.fail({}, {})",
+                          pq_quote_literal(task->id),
+                          pq_quote_literal(std::string(message)));
+    }
+
+    pool_.execute(sql,
+        [this, task](std::vector<PgResult> /*results*/) {
+            remove_task(task->id);
+        },
+        [this, task](std::string_view /*error*/) {
+            remove_task(task->id);
+        });
+}
+
+// ─── check_timeouts ─────────────────────────────────────────────────────────
+
+void PGFetch::check_timeouts(std::chrono::steady_clock::time_point now)
+{
+    for (auto& task : queue_) {
+        if (task->in_progress && now >= task->deadline) {
+            do_fail(task, "request timeout");
+        }
+    }
+}
+
+// ─── remove_task ────────────────────────────────────────────────────────────
+
+void PGFetch::remove_task(const std::string& id)
+{
+    queue_.erase(
+        std::remove_if(queue_.begin(), queue_.end(),
+            [&id](const auto& t) { return t->id == id; }),
+        queue_.end());
+}
+
+} // namespace apostol
+
+#endif // WITH_POSTGRESQL

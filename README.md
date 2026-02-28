@@ -1,9 +1,9 @@
-[![ru](https://img.shields.io/badge/lang-ru-green.svg)](https://github.com/apostoldevel/module-PGFetch/blob/master/README.ru-RU.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](README.ru-RU.md)
 
 Postgres Fetch
 -
 
-**PGFetch** is a module for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+**PGFetch** — a module for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Description
 -
@@ -77,7 +77,7 @@ $$ LANGUAGE plpgsql
 Database module
 -
 
-PGFetch is tightly coupled to the **`http`** module of [db-platform](https://github.com/apostoldevel/db-platform) (`db/sql/platform/http/`).
+PGFetch is tightly coupled to the **`http`** database module — [db-http](https://github.com/apostoldevel/db-http).
 
 Outgoing requests and their results are stored entirely in this module:
 
@@ -88,14 +88,19 @@ Outgoing requests and their results are stored entirely in this module:
 | `http.fetch` (view) | Join of `http.request` + `http.response` for convenient inspection of request/response pairs |
 | `http.fetch(resource, ...)` | PL/pgSQL function that enqueues a new outgoing request and returns its `uuid` |
 
-> **Note:** PGFetch handles **outgoing** HTTP requests initiated from PL/pgSQL via `http.fetch()`. For **incoming** HTTP requests dispatched into PL/pgSQL, see [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — both modules share the same `http` db-platform module.
+> **Note:** PGFetch handles **outgoing** HTTP requests initiated from PL/pgSQL via `http.fetch()`. For **incoming** HTTP requests dispatched into PL/pgSQL, see [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — both modules share the same [db-http](https://github.com/apostoldevel/db-http) database module.
 
 Configuration
 -
 
-```ini
-[helper/PGFetch]
-enable=true
+```json
+{
+  "modules": {
+    "PGFetch": {
+      "enabled": true
+    }
+  }
+}
 ```
 
 Database installation
@@ -110,7 +115,7 @@ Follow the instructions for building and installing [Apostol](https://github.com
 Function Parameters
 -
 
-To performs HTTP request:
+To perform an HTTP request:
 ~~~sql
 /**
  * Performs an HTTP request.

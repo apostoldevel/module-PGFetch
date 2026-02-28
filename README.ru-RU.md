@@ -1,8 +1,8 @@
-[![en](https://img.shields.io/badge/lang-en-green.svg)](https://github.com/apostoldevel/module-PGFetch/blob/master/README.md)
+[![en](https://img.shields.io/badge/lang-en-green.svg)](README.md)
 
 Postgres Fetch
 -
-**PGFetch** - модуль для [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+**PGFetch** — модуль для [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Описание
 -
@@ -22,10 +22,10 @@ SELECT http.fetch('http://localhost:8080/api/v1/time');
 
 Исходящие запросы записываются в таблицу `http.request`, результат выполнения запроса будет сохранён в таблице `http.response`.
 
-Для удобноного просмотра исходящих запросов и полученных на них ответов воспользуйтесь представлением `http.fetch`:
+Для удобного просмотра исходящих запросов и полученных на них ответов воспользуйтесь представлением `http.fetch`:
 
 ~~~sql
-SELECT * FROM http.fetch ORDER BY datestart DESC; 
+SELECT * FROM http.fetch ORDER BY datestart DESC;
 ~~~
 
 Функция `http.fetch()` асинхронная, в качестве ответа она вернёт уникальный номер исходящего запроса.
@@ -39,7 +39,7 @@ SELECT * FROM http.fetch ORDER BY datestart DESC;
 SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
 ~~~
 
-Функции обратного вызова должна быть создана заранее и в качестве параметра она должна принимать уникальный номер исходящего запроса (тип `uuid`).
+Функции обратного вызова должны быть созданы заранее и в качестве параметра должны принимать уникальный номер исходящего запроса (тип `uuid`).
 
 ~~~sql
 CREATE OR REPLACE FUNCTION http.done (
@@ -78,7 +78,7 @@ $$ LANGUAGE plpgsql
 Модуль базы данных
 -
 
-PGFetch тесно связан с модулем **`http`** платформы [db-platform](https://github.com/apostoldevel/db-platform) (`db/sql/platform/http/`).
+PGFetch тесно связан с модулем **`http`** базы данных — [db-http](https://github.com/apostoldevel/db-http).
 
 Исходящие запросы и их результаты хранятся исключительно в этом модуле:
 
@@ -89,32 +89,34 @@ PGFetch тесно связан с модулем **`http`** платформы 
 | `http.fetch` (представление) | Объединение `http.request` + `http.response` для удобного просмотра пар запрос/ответ |
 | `http.fetch(resource, ...)` | PL/pgSQL-функция, добавляющая новый исходящий запрос в очередь и возвращающая его `uuid` |
 
-> **Примечание:** PGFetch обрабатывает **исходящие** HTTP-запросы, инициируемые из PL/pgSQL через `http.fetch()`. Для **входящих** HTTP-запросов, диспетчеризуемых в PL/pgSQL, используйте [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — оба модуля разделяют один и тот же модуль `http` платформы db-platform.
+> **Примечание:** PGFetch обрабатывает **исходящие** HTTP-запросы, инициируемые из PL/pgSQL через `http.fetch()`. Для **входящих** HTTP-запросов, диспетчеризуемых в PL/pgSQL, используйте [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — оба модуля разделяют один и тот же модуль базы данных [db-http](https://github.com/apostoldevel/db-http).
 
 Настройка
 -
 
-```ini
-[helper/PGFetch]
-enable=true
+```json
+{
+  "modules": {
+    "PGFetch": {
+      "enabled": true
+    }
+  }
+}
 ```
 
 Установка базы данных
 -
-Следуйте указаниям по установке PostgreSQL в описании [Апостол](https://github.com/apostoldevel/apostol#postgresql)
+Следуйте указаниям по установке PostgreSQL в описании [Апостол](https://github.com/apostoldevel/apostol#postgresql).
 
 Установка модуля
 -
-Следуйте указаниям по сборке и установке [Апостол](https://github.com/apostoldevel/apostol#%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0)
+Следуйте указаниям по сборке и установке [Апостол](https://github.com/apostoldevel/apostol#build-and-installation).
 
 Параметры функций
 -
 
 Для отправки HTTP-запроса:
 ~~~sql
---------------------------------------------------------------------------------
--- HTTP FETCH ------------------------------------------------------------------
---------------------------------------------------------------------------------
 /**
  * Выполняет HTTP запрос.
  * @param {text} resource - Ресурс

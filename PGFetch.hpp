@@ -1,87 +1,89 @@
-/*++
+#pragma once
 
-Program name:
+#ifdef WITH_POSTGRESQL
 
-  Apostol CRM
+#include "apostol/fetch_client.hpp"
+#include "apostol/http.hpp"
+#include "apostol/module.hpp"
+#include "apostol/pg.hpp"
 
-Module Name:
+#include <chrono>
+#include <deque>
+#include <memory>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
 
-  PGFetch.hpp
+namespace apostol
+{
 
-Notices:
+class Application;
+class EventLoop;
 
-  Module: Postgres Fetch
+// ─── PGFetch ─────────────────────────────────────────────────────────────────
+//
+// Helper module that listens for PG NOTIFY on channel "http", fetches
+// outbound HTTP requests via FetchClient, and stores responses back in PG.
+//
+// Lifecycle:
+//   on_start()  → pool_.listen("http", ...)
+//   on_notify() → parse request_id, enqueue FetchTask
+//   heartbeat() → process_queue() + check_timeouts()
+//   on_stop()   → pool_.unlisten("http")
+//
+// SQL functions used:
+//   SELECT * FROM http.request('{id}'::uuid)    — get request payload
+//   SELECT http.create_response(...)             — store response
+//   SELECT http.fail('{id}'::uuid, '{message}')  — mark request failed
+//
+// Mirrors v1 CPGFetch from src/modules/Helpers/PGFetch/.
+//
+class PGFetch final : public Module
+{
+public:
+    PGFetch(Application& app, EventLoop& loop);
 
-Author:
+    std::string_view name() const override { return "PGFetch"; }
+    bool enabled() const override { return enabled_; }
 
-  Copyright (c) Prepodobny Alen
+    // PGFetch does not handle incoming HTTP requests — it's a helper.
+    bool execute(const HttpRequest&, HttpResponse&) override { return false; }
 
-  mailto: alienufo@inbox.ru
-  mailto: ufocomp@gmail.com
+    void on_start() override;
+    void on_stop() override;
+    void heartbeat(std::chrono::system_clock::time_point now) override;
 
---*/
+private:
+    struct FetchTask
+    {
+        std::string id;                // request UUID
+        nlohmann::json payload;        // parsed from http.request()
+        bool in_progress{false};
+        std::chrono::steady_clock::time_point deadline;
+    };
 
-#ifndef APOSTOL_PQ_FETCH_HPP
-#define APOSTOL_PQ_FETCH_HPP
-//----------------------------------------------------------------------------------------------------------------------
+    void on_notify(std::string_view channel, std::string_view payload);
+    void do_query(std::shared_ptr<FetchTask> task);
+    void do_curl(std::shared_ptr<FetchTask> task);
+    void do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp);
+    void do_fail(std::shared_ptr<FetchTask> task, std::string_view message);
 
-#include "FetchCommon.hpp"
-//----------------------------------------------------------------------------------------------------------------------
+    void process_queue();
+    void check_timeouts(std::chrono::steady_clock::time_point now);
+    void remove_task(const std::string& id);
 
-extern "C++" {
+    PgPool&      pool_;
+    FetchClient  fetch_;
+    long        timeout_ms_;
+    bool        enabled_;
 
-namespace Apostol {
+    std::deque<std::shared_ptr<FetchTask>> queue_;
 
-    namespace Module {
+    // Throttle heartbeat checks: check_date_ controls how often we
+    // re-check the listener status (mirrors v1 m_CheckDate pattern)
+    std::chrono::steady_clock::time_point check_date_{};
+};
 
-        //--------------------------------------------------------------------------------------------------------------
+} // namespace apostol
 
-        //-- CPGFetch --------------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        class CPGFetch: public CFetchCommon {
-        private:
-
-            CCURLClient m_Client;
-
-            CDateTime m_CheckDate;
-
-            void InitListen();
-            void CheckListen();
-
-        protected:
-
-            void DoFetch(CQueueHandler *AHandler);
-            void DoCURL(CFetchHandler *AHandler);
-
-            void DoQuery(CQueueHandler *AHandler);
-
-            void DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) override;
-
-            void DoCurlException(CCURLClient *Sender, const Delphi::Exception::Exception &E) const;
-
-        public:
-
-            explicit CPGFetch(CModuleProcess *AProcess);
-
-            ~CPGFetch() override = default;
-
-            static class CPGFetch *CreateModule(CModuleProcess *AProcess) {
-                return new CPGFetch(AProcess);
-            }
-
-            void Initialization(CModuleProcess *AProcess) override;
-
-            void Heartbeat(CDateTime DateTime) override;
-
-            bool Enabled() override;
-
-        };
-
-    }
-}
-
-using namespace Apostol::Module;
-}
-#endif //APOSTOL_PQ_FETCH_HPP
+#endif // WITH_POSTGRESQL
