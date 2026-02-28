@@ -3,7 +3,7 @@
 Postgres Fetch
 -
 
-**Module** for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+**Module** for **Apostol CRM**[^crm].
 
 Description
 -
@@ -143,8 +143,8 @@ Configuration
 Installation
 -
 
-Follow the instructions for installing PostgreSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
+Follow the instructions for installing PostgreSQL in the description of [Апостол (C++20)](https://github.com/apostoldevel/libapostol#postgresql).
 
-Follow the build and installation instructions for [Apostol](https://github.com/apostoldevel/apostol#build-and-installation).
+Follow the build and installation instructions for [Апостол (C++20)](https://github.com/apostoldevel/libapostol#build-and-installation).
 
-[^crm]: **Apostol CRM** is an abstract term, not a standalone product. It refers to any project that uses both the [Apostol](https://github.com/apostoldevel/apostol) C++ framework and [db-platform](https://github.com/apostoldevel/db-platform) together through purpose-built modules and processes. Each framework can be used independently; combined, they form a full-stack backend platform.
+[^crm]: **Apostol CRM** — шаблон-проект построенный на фреймворках [A-POST-OL](https://github.com/apostoldevel/libapostol) (C++20) и [PostgreSQL Framework for Backend Development](https://github.com/apostoldevel/db-platform).
