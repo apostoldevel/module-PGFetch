@@ -174,6 +174,11 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     auto resp_headers_json = headers_to_json(resp.headers);
 
     // Store response via http.create_response(id, status, status_text, headers, body)
+    // body parameter is bytea — use convert_to() for text→bytea conversion
+    auto body_sql = resp.body.empty()
+        ? std::string("null")
+        : fmt::format("convert_to({}, 'UTF-8')", pq_quote_literal(resp.body));
+
     auto sql = fmt::format(
         "SELECT http.create_response({}, {}, {}, {}::jsonb, {})",
         pq_quote_literal(task->id),
@@ -181,7 +186,7 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
         pq_quote_literal(std::string(status_text(
             static_cast<HttpStatus>(resp.status_code)))),
         pq_quote_literal(resp_headers_json),
-        pq_quote_literal(resp.body));
+        body_sql);
 
     pool_.execute(sql,
         [this, task](std::vector<PgResult> /*results*/) {
