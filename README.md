@@ -3,7 +3,7 @@
 Postgres Fetch
 -
 
-**PGFetch** — a module for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+**Module** for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Description
 -
@@ -32,6 +32,7 @@ The `http.fetch()` function is asynchronous, and it returns a unique identifier 
 
 Callback functions
 -
+
 In the `http.fetch()` function, you can pass the name of a callback function for processing a successful response or in the case of a failure.
 
 ~~~sql
@@ -90,28 +91,6 @@ Outgoing requests and their results are stored entirely in this module:
 
 > **Note:** PGFetch handles **outgoing** HTTP requests initiated from PL/pgSQL via `http.fetch()`. For **incoming** HTTP requests dispatched into PL/pgSQL, see [PGHTTP](https://github.com/apostoldevel/module-PGHTTP) — both modules share the same [db-http](https://github.com/apostoldevel/db-http) database module.
 
-Configuration
--
-
-```json
-{
-  "modules": {
-    "PGFetch": {
-      "enabled": true
-    }
-  }
-}
-```
-
-Database installation
--
-Follow the instructions for installing PostgreSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
-
-Module installation
--
-
-Follow the instructions for building and installing [Apostol](https://github.com/apostoldevel/apostol#build-and-installation).
-
 Function Parameters
 -
 
@@ -147,5 +126,25 @@ CREATE OR REPLACE FUNCTION http.fetch (
   data          jsonb DEFAULT null
 ) RETURNS       uuid
 ~~~
+
+Configuration
+-
+
+```json
+{
+  "modules": {
+    "PGFetch": {
+      "enabled": true
+    }
+  }
+}
+```
+
+Installation
+-
+
+Follow the instructions for installing PostgreSQL in the description of [Apostol](https://github.com/apostoldevel/apostol#postgresql).
+
+Follow the build and installation instructions for [Apostol](https://github.com/apostoldevel/apostol#build-and-installation).
 
 [^crm]: **Apostol CRM** is an abstract term, not a standalone product. It refers to any project that uses both the [Apostol](https://github.com/apostoldevel/apostol) C++ framework and [db-platform](https://github.com/apostoldevel/db-platform) together through purpose-built modules and processes. Each framework can be used independently; combined, they form a full-stack backend platform.
