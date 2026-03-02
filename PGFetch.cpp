@@ -190,7 +190,21 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
 
     pool_.execute(sql,
         [this, task](std::vector<PgResult> /*results*/) {
-            remove_task(task->id);
+            // Call custom done callback if specified
+            std::string done_func;
+            if (task->payload.contains("done") && task->payload["done"].is_string())
+                done_func = task->payload["done"].get<std::string>();
+
+            if (!done_func.empty()) {
+                auto done_sql = fmt::format("SELECT {}({})",
+                                            done_func,
+                                            pq_quote_literal(task->id));
+                pool_.execute(done_sql,
+                    [this, task](std::vector<PgResult>) { remove_task(task->id); },
+                    [this, task](std::string_view) { remove_task(task->id); });
+            } else {
+                remove_task(task->id);
+            }
         },
         [this, task](std::string_view /*error*/) {
             // Best effort — remove task even if storing response failed
