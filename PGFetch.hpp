@@ -59,6 +59,7 @@ private:
         std::string id;                // request UUID
         nlohmann::json payload;        // parsed from http.request()
         bool in_progress{false};
+        bool timed_out{false};
         std::chrono::steady_clock::time_point deadline;
     };
 
@@ -79,9 +80,6 @@ private:
 
     std::deque<std::shared_ptr<FetchTask>> queue_;
 
-    // Throttle heartbeat checks: check_date_ controls how often we
-    // re-check the listener status (mirrors v1 m_CheckDate pattern)
-    std::chrono::steady_clock::time_point check_date_{};
 };
 
 } // namespace apostol

@@ -247,7 +247,8 @@ void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
 void PGFetch::check_timeouts(std::chrono::steady_clock::time_point now)
 {
     for (auto& task : queue_) {
-        if (task->in_progress && now >= task->deadline) {
+        if (task->in_progress && !task->timed_out && now >= task->deadline) {
+            task->timed_out = true;
             do_fail(task, "request timeout");
         }
     }
