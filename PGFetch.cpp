@@ -216,26 +216,29 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
 
 void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
 {
-    // Check if there's a custom fail function in the payload
-    std::string fail_func;
-    if (task->payload.contains("fail") && task->payload["fail"].is_string())
-        fail_func = task->payload["fail"].get<std::string>();
+    // Always mark request as failed (state = 3) first
+    auto fail_sql = fmt::format("SELECT http.fail({}, {})",
+                                pq_quote_literal(task->id),
+                                pq_quote_literal(std::string(message)));
 
-    std::string sql;
-    if (!fail_func.empty()) {
-        sql = fmt::format("SELECT {}({}, {})",
-                          fail_func,
-                          pq_quote_literal(task->id),
-                          pq_quote_literal(std::string(message)));
-    } else {
-        sql = fmt::format("SELECT http.fail({}, {})",
-                          pq_quote_literal(task->id),
-                          pq_quote_literal(std::string(message)));
-    }
+    pool_.execute(fail_sql,
+        [this, task, msg = std::string(message)](std::vector<PgResult> /*results*/) {
+            // Then call custom fail callback if specified
+            std::string fail_func;
+            if (task->payload.contains("fail") && task->payload["fail"].is_string())
+                fail_func = task->payload["fail"].get<std::string>();
 
-    pool_.execute(sql,
-        [this, task](std::vector<PgResult> /*results*/) {
-            remove_task(task->id);
+            if (!fail_func.empty()) {
+                auto sql = fmt::format("SELECT {}({}, {})",
+                                       fail_func,
+                                       pq_quote_literal(task->id),
+                                       pq_quote_literal(msg));
+                pool_.execute(sql,
+                    [this, task](std::vector<PgResult>) { remove_task(task->id); },
+                    [this, task](std::string_view) { remove_task(task->id); });
+            } else {
+                remove_task(task->id);
+            }
         },
         [this, task](std::string_view /*error*/) {
             remove_task(task->id);
