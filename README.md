@@ -39,7 +39,9 @@ In the `http.fetch()` function, you can pass the name of a callback function for
 SELECT * FROM http.fetch('http://localhost:8080/api/v1/time', done => 'http.done', fail => 'http.fail');
 ~~~
 
-The callback functions must be created in advance, and they must accept the unique identifier of the outgoing request (of type uuid) as a parameter.
+The callback functions must be created in advance. `done` accepts the unique identifier of the outgoing request (`uuid`); `fail` accepts the identifier and the error text (`uuid, text`).
+
+The name is `schema.function`, as `http.fetch` checks it; PGFetch quotes each part as an identifier, so the name is never read as SQL. A name that is not of that shape is not called — the request is marked failed with the reason.
 
 ~~~sql
 CREATE OR REPLACE FUNCTION http.done (
@@ -60,7 +62,8 @@ $$ LANGUAGE plpgsql
 
 ~~~sql
 CREATE OR REPLACE FUNCTION http.fail (
-  pRequest  uuid
+  pRequest  uuid,
+  pError    text
 ) RETURNS   void
 AS $$
 DECLARE
@@ -84,7 +87,7 @@ Outgoing requests and their results are stored entirely in this module:
 
 | Object | Purpose |
 |--------|---------|
-| `http.request` | Queued outgoing HTTP requests; PGFetch polls this table and dispatches each pending entry |
+| `http.request` | Queued outgoing HTTP requests; an insert notifies channel `http`, PGFetch reads the row and dispatches it |
 | `http.response` | Stores the HTTP response (status, headers, body) for each completed request |
 | `http.fetch` (view) | Join of `http.request` + `http.response` for convenient inspection of request/response pairs |
 | `http.fetch(resource, ...)` | PL/pgSQL function that enqueues a new outgoing request and returns its `uuid` |
@@ -127,18 +130,38 @@ CREATE OR REPLACE FUNCTION http.fetch (
 ) RETURNS       uuid
 ~~~
 
+Delivery and resend
+-
+
+A new row notifies channel `http`; PGFetch reads it with `http.take(id)` and sends it. No row back means *do not send* — the request is gone, already done or failed, or its lifetime has elapsed (`take` closes that one itself) — and the task is dropped without a failure or a callback.
+
+A notification sent while PGFetch is not listening (the process restarting, PostgreSQL restarting) reaches no one. Every time LISTEN is (re)established PGFetch waits `sweep_age` seconds and calls `http.sweep(age, limit)`: requests older than any flight that are still unsent, **and carry a lifetime (`expire`)**, are handed out again, up to `max_attempts` times; those past their lifetime or attempts are closed on the way (state 3, no callback). A request without `expire` is never resent. Resend is at-least-once: a producer that must not repeat puts an idempotency key in the headers, or sets no `expire`.
+
+The response and the `done` callback are stored in one transaction, as are the failure and the `fail` callback. A callback that throws takes its pair down with it; the request is then marked failed (state 3) with the callback's error, the response kept — never recorded as done while the callback's work was lost.
+
+On a database without `http.take`/`http.sweep` (db-platform before 1.2.32), or with libapostol without `APOSTOL_PG_LISTEN_READY`, or with no `timeout`, PGFetch says so in the log and runs as before: reads by `http.request(id)`, no resend.
+
 Configuration
 -
 
 ```json
 {
-  "modules": {
+  "module": {
     "PGFetch": {
-      "enabled": true
+      "enable": true,
+      "timeout": 30,
+      "sweep_age": 90,
+      "sweep_limit": 100
     }
   }
 }
 ```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `timeout` | none | seconds per request; without it a flight is unbounded and nothing is resent |
+| `sweep_age` | 90 | seconds after LISTEN is up before `http.sweep`, and the age it passes; raised to `timeout + 30` if shorter |
+| `sweep_limit` | 100 | rows per `http.sweep` call; a full batch is followed by another on the next heartbeat |
 
 Installation
 -
