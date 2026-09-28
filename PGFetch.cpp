@@ -169,7 +169,14 @@ void PGFetch::probe()
         [this](std::string_view error) {
             probing_ = false;
             next_probe_ = std::chrono::steady_clock::now() + probe_retry;
-            log_.error("PGFetch: probe for http.take/http.sweep failed: {}", error);
+            // A re-probe (on_listen_ready) of a source already known changes
+            // nothing: sending goes on the way it was.
+            if (source_ == Source::unknown)
+                log_.error("PGFetch: probe for http.take/http.sweep failed ({} request(s) waiting, none sent until "
+                           "it answers): {}", queue_.size(), error);
+            else
+                log_.error("PGFetch: re-probe for http.take/http.sweep failed, still reading through {}: {}",
+                           source_ == Source::take ? "http.take" : "http.request", error);
         });
 }
 
@@ -295,7 +302,16 @@ void PGFetch::do_sweep()
 
 void PGFetch::process_queue()
 {
-    // Until the probe answers it is not known how a row is read.
+    // Until the probe answers it is not known how a row is read. The queue
+    // waits, with no deadline, however long the probe keeps failing or goes
+    // unanswered (a failure line counts what waits; a database that is away
+    // leaves no line of ours — nothing arrives then either). Deliberately:
+    // reading by http.request instead would send what http.take would close
+    // as expired — a lifetime is the point of T577 — and failing a waiting
+    // request needs the very database that is answering with errors. When
+    // the probe answers, each waiting row is read as that database reads
+    // it: http.take settles it by its lifetime; a database without
+    // http.take has no lifetime to break.
     if (source_ == Source::unknown)
         return;
 
