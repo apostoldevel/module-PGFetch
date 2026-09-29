@@ -508,9 +508,14 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
         remove_task(task->id);
     };
 
+    // Every store below is sent again after a lost connection (T627): a
+    // repeat of one that committed stops on http.response's primary key and
+    // rolls back whole. Not repeated, a store lost before its commit would
+    // leave the request in state 1 — and one with a lifetime (expire) for
+    // http.sweep to send out a second time.
     const auto done_func = callback_of(*task, "done");
     if (done_func.empty()) {
-        pool_.execute(store_sql, finish, lost);
+        pool_.execute(store_sql, finish, lost, false, PgRetry::if_lost);
         return;
     }
 
@@ -518,24 +523,23 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     if (!ident) {
         auto msg = fmt::format("done callback '{}' is not a function name — not called", done_func);
         log_.error("PGFetch: request {}: {}", task->id, msg);
-        pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost);
+        pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost, false, PgRetry::if_lost);
         return;
     }
 
     auto sql = fmt::format("{}; SELECT {}({})", store_sql, *ident, pq_quote_literal(task->id));
 
-    // Sent again after a lost connection (T627): if the first one committed,
-    // the repeat stops on http.response's primary key and rolls back whole —
-    // the callback does not run twice, and the handler below only logs (its
-    // store hits the same key); if it did not, the response is stored now.
-    // Not repeated, the handler would mark failed a request that may have
-    // been delivered.
+    // With the callback in the same transaction, the key also keeps it from
+    // running twice, and the handler below only logs (its store hits the same
+    // key). Not repeated, the handler would mark failed a request that may
+    // have been delivered.
     pool_.execute(sql, finish,
         [this, task, store_sql, done_func, finish, lost](std::string_view error) {
             auto msg = fmt::format("response and done callback {} rolled back: {}",
                                    done_func, error);
             log_.error("PGFetch: request {}: {}", task->id, msg);
-            pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost);
+            pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost,
+                          false, PgRetry::if_lost);
         },
         false, PgRetry::if_lost);
 }
