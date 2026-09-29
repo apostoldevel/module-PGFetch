@@ -67,6 +67,7 @@ std::string fail_sql(const std::string& id, const std::string& message)
 PGFetch::PGFetch(Application& app, EventLoop& loop)
     : pool_(app.db_pool())
     , log_(app.logger())
+    , modules_(app.module_manager())
     , fetch_(loop)
     , timeout_ms_(0)
     , sweep_age_s_(90)
@@ -126,9 +127,30 @@ void PGFetch::on_start()
 #endif
 }
 
+// A request out on the wire has no outcome yet, and nothing waits for one:
+// the shutdown drain counts database queries only, so the process would exit
+// with the row in state 1 — never sent again without a lifetime, and with one
+// sent twice (T672). It is failed here, as a timeout is: the remote may have
+// acted on it, and the message says so. A failure written from on_stop() is
+// delivered by the drain that follows; an answer arriving after it is
+// dropped (timed_out). A row read once the shutdown has begun is not sent
+// (do_query): it stays as the database has it — resent by http.sweep on the
+// next start if it has a lifetime, like a request that never reached us.
+
 void PGFetch::on_stop()
 {
     pool_.unlisten("http");
+
+    std::size_t failed = 0;
+    for (auto& task : queue_) {
+        if (task->sent && !task->settling && !task->timed_out) {
+            task->timed_out = true;
+            do_fail(task, "stopped with the request in flight: the remote may have received it, outcome unknown");
+            ++failed;
+        }
+    }
+    if (failed > 0)
+        log_.warn("PGFetch: stopping with {} request(s) in flight — marked failed, outcome unknown", failed);
 }
 
 // ─── probe ──────────────────────────────────────────────────────────────────
@@ -351,6 +373,13 @@ void PGFetch::do_query(std::shared_ptr<FetchTask> task)
             if (task->timed_out)
                 return;
 
+            // The shutdown has begun: a row read now would go out with nobody
+            // left to settle it. Not sent, it stays as the database has it.
+            if (modules_.stopped()) {
+                remove_task(task->id);
+                return;
+            }
+
             const bool none = results.empty() || !results[0].ok() ||
                               results[0].rows() == 0 || results[0].columns() == 0;
 
@@ -388,6 +417,11 @@ void PGFetch::do_query(std::shared_ptr<FetchTask> task)
         [this, task](std::string_view error) {
             if (task->timed_out)
                 return;
+            // Nothing was sent: while stopping, leave the row as it is.
+            if (modules_.stopped()) {
+                remove_task(task->id);
+                return;
+            }
             do_fail(task, fmt::format("PG error: {}", error));
         });
 }
@@ -422,13 +456,16 @@ void PGFetch::do_curl(std::shared_ptr<FetchTask> task)
         content = p["content"].get<std::string>();
     }
 
+    task->sent = true;
     fetch_.request(method, url, content, headers,
         // on_done
         [this, task](FetchResponse resp) {
-            // The deadline passed first: failure is reported, callback made.
+            // The deadline or the stop came first: failure is reported,
+            // callback made.
             if (task->timed_out) {
-                log_.warn("PGFetch: request {} answered {} after its deadline — response dropped",
-                          task->id, resp.status_code);
+                log_.warn("PGFetch: request {} answered {} after {} — response dropped",
+                          task->id, resp.status_code,
+                          modules_.stopped() ? "the stop" : "its deadline");
                 return;
             }
             do_done(task, resp);

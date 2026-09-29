@@ -32,7 +32,8 @@ class EventLoop;
 //   on_notify() → parse request_id, enqueue FetchTask (once per id)
 //   on_ready    → LISTEN confirmed: re-probe, sweep due in sweep_age seconds
 //   heartbeat() → process_queue() + check_timeouts() + sweep when due
-//   on_stop()   → pool_.unlisten("http")
+//   on_stop()   → pool_.unlisten("http"); a request out on the wire is
+//                 failed, outcome unknown (T672)
 //
 // SQL functions used:
 //   SELECT * FROM http.take('{id}'::uuid)       — the row to send; none = drop silently
@@ -75,6 +76,7 @@ private:
         std::string id;                // request UUID
         nlohmann::json payload;        // parsed from http.take()/http.request()
         bool in_progress{false};
+        bool sent{false};              // the HTTP request went out: its outcome is the remote's
         bool settling{false};          // do_done/do_fail under way: the deadline no longer applies
         bool timed_out{false};
         std::chrono::steady_clock::time_point deadline;
@@ -115,6 +117,9 @@ private:
     std::optional<std::chrono::steady_clock::time_point> ready_at_;
     std::chrono::steady_clock::time_point sweep_started_{};
     bool        sweeping_{false};
+    // Latched by the framework when the shutdown begins — at quiesce() on
+    // libapostol with T659, at on_stop() before it: nothing more goes out.
+    ModuleManager& modules_;
 
     std::deque<std::shared_ptr<FetchTask>> queue_;
 
