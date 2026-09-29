@@ -389,7 +389,12 @@ void PGFetch::do_query(std::shared_ptr<FetchTask> task)
             if (task->timed_out)
                 return;
             do_fail(task, fmt::format("PG error: {}", error));
-        });
+        },
+        false,
+        // Only reads the row (http.take closes an expired one, which is the
+        // same the second time): sent again after a lost connection, as before
+        // T627 — otherwise a request would fail on a blip before it was sent.
+        PgRetry::if_lost);
 }
 
 // ─── do_curl ────────────────────────────────────────────────────────────────
@@ -519,13 +524,20 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
 
     auto sql = fmt::format("{}; SELECT {}({})", store_sql, *ident, pq_quote_literal(task->id));
 
+    // Sent again after a lost connection (T627): if the first one committed,
+    // the repeat stops on http.response's primary key and rolls back whole —
+    // the callback does not run twice, and the handler below only logs (its
+    // store hits the same key); if it did not, the response is stored now.
+    // Not repeated, the handler would mark failed a request that may have
+    // been delivered.
     pool_.execute(sql, finish,
         [this, task, store_sql, done_func, finish, lost](std::string_view error) {
             auto msg = fmt::format("response and done callback {} rolled back: {}",
                                    done_func, error);
             log_.error("PGFetch: request {}: {}", task->id, msg);
             pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost);
-        });
+        },
+        false, PgRetry::if_lost);
 }
 
 // ─── do_fail ────────────────────────────────────────────────────────────────
