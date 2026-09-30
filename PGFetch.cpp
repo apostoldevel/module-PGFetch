@@ -545,6 +545,12 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
         remove_task(task->id);
     };
 
+    // quiet: every store below carries the response as the far end sent it —
+    // all headers and the whole body (hex, trivially decoded). Such bodies hold
+    // credentials: an OAuth access_token, Stripe's PaymentIntent client_secret,
+    // an OCPI partner's token from /credentials. PgPool logs statement text, and
+    // a dedicated postgres.log keeps it at debug (T713).
+    //
     // Every store below is sent again after a lost connection (T627): a
     // repeat of one that committed stops on http.response's primary key and
     // rolls back whole. Not repeated, a store lost before its commit would
@@ -552,7 +558,7 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     // http.sweep to send out a second time.
     const auto done_func = callback_of(*task, "done");
     if (done_func.empty()) {
-        pool_.execute(store_sql, finish, lost, false, PgRetry::if_lost);
+        pool_.execute(store_sql, finish, lost, /*quiet=*/true, PgRetry::if_lost);
         return;
     }
 
@@ -560,7 +566,7 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     if (!ident) {
         auto msg = fmt::format("done callback '{}' is not a function name — not called", done_func);
         log_.error("PGFetch: request {}: {}", task->id, msg);
-        pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost, false, PgRetry::if_lost);
+        pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost, /*quiet=*/true, PgRetry::if_lost);
         return;
     }
 
@@ -576,9 +582,9 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
                                    done_func, error);
             log_.error("PGFetch: request {}: {}", task->id, msg);
             pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost,
-                          false, PgRetry::if_lost);
+                          /*quiet=*/true, PgRetry::if_lost);
         },
-        false, PgRetry::if_lost);
+        /*quiet=*/true, PgRetry::if_lost);
 }
 
 // ─── do_fail ────────────────────────────────────────────────────────────────
