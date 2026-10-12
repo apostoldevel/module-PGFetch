@@ -345,6 +345,11 @@ void PGFetch::do_sweep()
 
 // ─── process_queue ──────────────────────────────────────────────────────────
 
+// A refused execute in do_query() and do_sweep() is not caught: they are
+// reached from heartbeat() only, where an exception ends the helper (T637 — a
+// timer unwinds the loop), and the rows it leaves in state 1 are sent again by
+// http.sweep at the next start. A settle is different: it is also reached from
+// the pool's and the fetch client's callbacks, where nothing would undo it.
 void PGFetch::process_queue()
 {
     // Until the probe answers it is not known how a row is read. The queue
@@ -549,8 +554,13 @@ std::string PGFetch::callback_of(const FetchTask& task, const char* key) const
 // callers are the pool's own handlers (an exception out of one leaves
 // PgPool::on_io before dispatch_queue() and rearm_io()), fetch callbacks and
 // loops over queue_.
+//
+// Only the pool's refusal is caught (settle_execute). An exception from
+// building the statement is not a refusal: taken for one, the task would go
+// and http.sweep would send the request again for a response that could not
+// even be put together.
 void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp)
-try {
+{
     task->settling = true;
 
     // Build response headers JSON
@@ -590,7 +600,7 @@ try {
     // http.sweep to send out a second time.
     const auto done_func = callback_of(*task, "done");
     if (done_func.empty()) {
-        pool_.execute(store_sql, finish, lost, /*quiet=*/true, PgRetry::if_lost);
+        settle_execute(task, store_sql, finish, lost, /*quiet=*/true, PgRetry::if_lost);
         return;
     }
 
@@ -598,7 +608,8 @@ try {
     if (!ident) {
         auto msg = fmt::format("done callback '{}' is not a function name — not called", done_func);
         log_.error("PGFetch: request {}: {}", task->id, msg);
-        pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost, /*quiet=*/true, PgRetry::if_lost);
+        settle_execute(task, store_sql + "; " + fail_sql(task->id, msg), finish, lost,
+                       /*quiet=*/true, PgRetry::if_lost);
         return;
     }
 
@@ -608,21 +619,15 @@ try {
     // running twice, and the handler below only logs (its store hits the same
     // key). Not repeated, the handler would mark failed a request that may
     // have been delivered.
-    pool_.execute(sql, finish,
+    settle_execute(task, sql, finish,
         [this, task, store_sql, done_func, finish, lost](std::string_view error) {
             auto msg = fmt::format("response and done callback {} rolled back: {}",
                                    done_func, error);
             log_.error("PGFetch: request {}: {}", task->id, msg);
-            try {
-                pool_.execute(store_sql + "; " + fail_sql(task->id, msg), finish, lost,
-                              /*quiet=*/true, PgRetry::if_lost);
-            } catch (const std::exception& e) {
-                settle_threw(task, e.what());
-            }
+            settle_execute(task, store_sql + "; " + fail_sql(task->id, msg), finish, lost,
+                           /*quiet=*/true, PgRetry::if_lost);
         },
         /*quiet=*/true, PgRetry::if_lost);
-} catch (const std::exception& e) {
-    settle_threw(task, e.what());
 }
 
 // ─── do_fail ────────────────────────────────────────────────────────────────
@@ -630,10 +635,10 @@ try {
 // Marking the request failed (state 3) and the fail callback go in one
 // transaction, as in do_done: a callback that throws is named in the error.
 
-// Same as do_done: a throw out of execute() takes the task out of queue_ and
-// is not passed on.
+// Same as do_done: the pool's refusal takes the task out of queue_ and is not
+// passed on.
 void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
-try {
+{
     task->settling = true;
 
     const std::string msg(message);
@@ -647,7 +652,7 @@ try {
 
     const auto fail_func = callback_of(*task, "fail");
     if (fail_func.empty()) {
-        pool_.execute(mark_sql, finish, lost);
+        settle_execute(task, mark_sql, finish, lost);
         return;
     }
 
@@ -655,34 +660,44 @@ try {
     if (!ident) {
         auto why = fmt::format("{}; fail callback '{}' is not a function name — not called", msg, fail_func);
         log_.error("PGFetch: request {}: {}", task->id, why);
-        pool_.execute(fail_sql(task->id, why), finish, lost);
+        settle_execute(task, fail_sql(task->id, why), finish, lost);
         return;
     }
 
     auto sql = fmt::format("{}; SELECT {}({}, {})", mark_sql, *ident,
                            pq_quote_literal(task->id), pq_quote_literal(msg));
 
-    pool_.execute(sql, finish,
+    settle_execute(task, sql, finish,
         [this, task, msg, fail_func, finish, lost](std::string_view error) {
             auto why = fmt::format("{}; fail callback {} rolled back: {}", msg, fail_func, error);
             log_.error("PGFetch: request {}: {}", task->id, why);
-            try {
-                pool_.execute(fail_sql(task->id, why), finish, lost);
-            } catch (const std::exception& e) {
-                settle_threw(task, e.what());
-            }
+            settle_execute(task, fail_sql(task->id, why), finish, lost);
         });
-} catch (const std::exception& e) {
-    settle_threw(task, e.what());
 }
 
 // Takes the task out of queue_: a loop over queue_ that calls do_done/do_fail
 // must go over a copy (on_stop, check_timeouts do).
 void PGFetch::settle_threw(const std::shared_ptr<FetchTask>& task, std::string_view what)
 {
+    // Out first: the log line allocates, and under the pressure that made the
+    // pool refuse it may throw too — the task must not depend on it.
+    remove_task(task->id);
     log_.error("PGFetch: request {}: could not be settled — no query sent, the row stays as the "
                "database has it: {}", task->id, what);
-    remove_task(task->id);
+}
+
+// pool_.execute() for a settle: a refusal (T767 — epoll, nothing of the query
+// stays in the pool, no callback comes) takes the task out of queue_ instead of
+// leaving it settling for the life of the process. Caught around the call
+// only, whatever builds its arguments is the caller's own.
+template <typename... Args>
+void PGFetch::settle_execute(const std::shared_ptr<FetchTask>& task, Args&&... args)
+{
+    try {
+        pool_.execute(std::forward<Args>(args)...);
+    } catch (const std::exception& e) {
+        settle_threw(task, e.what());
+    }
 }
 
 // ─── check_timeouts ─────────────────────────────────────────────────────────
