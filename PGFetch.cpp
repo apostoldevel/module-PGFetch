@@ -555,7 +555,7 @@ std::string PGFetch::callback_of(const FetchTask& task, const char* key) const
 // PgPool::on_io before dispatch_queue() and rearm_io()), fetch callbacks and
 // loops over queue_.
 //
-// Only the pool's refusal is caught (settle_execute). An exception from
+// Only the pool's refusal is caught (settle_guarded). An exception from
 // building the statement is not a refusal: taken for one, the task would go
 // and http.sweep would send the request again for a response that could not
 // even be put together.
@@ -600,7 +600,9 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     // http.sweep to send out a second time.
     const auto done_func = callback_of(*task, "done");
     if (done_func.empty()) {
-        settle_execute(task, store_sql, finish, lost, /*quiet=*/true, PgRetry::if_lost);
+        settle_guarded(task, [&] {
+            pool_.execute(store_sql, finish, lost, /*quiet=*/true, PgRetry::if_lost);
+        });
         return;
     }
 
@@ -608,8 +610,10 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     if (!ident) {
         auto msg = fmt::format("done callback '{}' is not a function name — not called", done_func);
         log_.error("PGFetch: request {}: {}", task->id, msg);
-        settle_execute(task, store_sql + "; " + fail_sql(task->id, msg), finish, lost,
-                       /*quiet=*/true, PgRetry::if_lost);
+        const auto both = store_sql + "; " + fail_sql(task->id, msg);
+        settle_guarded(task, [&] {
+            pool_.execute(both, finish, lost, /*quiet=*/true, PgRetry::if_lost);
+        });
         return;
     }
 
@@ -619,15 +623,19 @@ void PGFetch::do_done(std::shared_ptr<FetchTask> task, const FetchResponse& resp
     // running twice, and the handler below only logs (its store hits the same
     // key). Not repeated, the handler would mark failed a request that may
     // have been delivered.
-    settle_execute(task, sql, finish,
-        [this, task, store_sql, done_func, finish, lost](std::string_view error) {
-            auto msg = fmt::format("response and done callback {} rolled back: {}",
-                                   done_func, error);
-            log_.error("PGFetch: request {}: {}", task->id, msg);
-            settle_execute(task, store_sql + "; " + fail_sql(task->id, msg), finish, lost,
-                           /*quiet=*/true, PgRetry::if_lost);
-        },
-        /*quiet=*/true, PgRetry::if_lost);
+    settle_guarded(task, [&] {
+        pool_.execute(sql, finish,
+            [this, task, store_sql, done_func, finish, lost](std::string_view error) {
+                auto msg = fmt::format("response and done callback {} rolled back: {}",
+                                       done_func, error);
+                log_.error("PGFetch: request {}: {}", task->id, msg);
+                const auto both = store_sql + "; " + fail_sql(task->id, msg);
+                settle_guarded(task, [&] {
+                    pool_.execute(both, finish, lost, /*quiet=*/true, PgRetry::if_lost);
+                });
+            },
+            /*quiet=*/true, PgRetry::if_lost);
+    });
 }
 
 // ─── do_fail ────────────────────────────────────────────────────────────────
@@ -652,7 +660,7 @@ void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
 
     const auto fail_func = callback_of(*task, "fail");
     if (fail_func.empty()) {
-        settle_execute(task, mark_sql, finish, lost);
+        settle_guarded(task, [&] { pool_.execute(mark_sql, finish, lost); });
         return;
     }
 
@@ -660,19 +668,23 @@ void PGFetch::do_fail(std::shared_ptr<FetchTask> task, std::string_view message)
     if (!ident) {
         auto why = fmt::format("{}; fail callback '{}' is not a function name — not called", msg, fail_func);
         log_.error("PGFetch: request {}: {}", task->id, why);
-        settle_execute(task, fail_sql(task->id, why), finish, lost);
+        const auto failed = fail_sql(task->id, why);
+        settle_guarded(task, [&] { pool_.execute(failed, finish, lost); });
         return;
     }
 
     auto sql = fmt::format("{}; SELECT {}({}, {})", mark_sql, *ident,
                            pq_quote_literal(task->id), pq_quote_literal(msg));
 
-    settle_execute(task, sql, finish,
-        [this, task, msg, fail_func, finish, lost](std::string_view error) {
-            auto why = fmt::format("{}; fail callback {} rolled back: {}", msg, fail_func, error);
-            log_.error("PGFetch: request {}: {}", task->id, why);
-            settle_execute(task, fail_sql(task->id, why), finish, lost);
-        });
+    settle_guarded(task, [&] {
+        pool_.execute(sql, finish,
+            [this, task, msg, fail_func, finish, lost](std::string_view error) {
+                auto why = fmt::format("{}; fail callback {} rolled back: {}", msg, fail_func, error);
+                log_.error("PGFetch: request {}: {}", task->id, why);
+                const auto failed = fail_sql(task->id, why);
+                settle_guarded(task, [&] { pool_.execute(failed, finish, lost); });
+            });
+    });
 }
 
 // Takes the task out of queue_: a loop over queue_ that calls do_done/do_fail
@@ -686,15 +698,22 @@ void PGFetch::settle_threw(const std::shared_ptr<FetchTask>& task, std::string_v
                "database has it: {}", task->id, what);
 }
 
-// pool_.execute() for a settle: a refusal (T767 — epoll, nothing of the query
-// stays in the pool, no callback comes) takes the task out of queue_ instead of
-// leaving it settling for the life of the process. Caught around the call
-// only, whatever builds its arguments is the caller's own.
-template <typename... Args>
-void PGFetch::settle_execute(const std::shared_ptr<FetchTask>& task, Args&&... args)
+// Runs @p send — one `pool_.execute(...)` of a settle: a refusal (T767 — epoll,
+// nothing of the query stays in the pool, no callback comes) takes the task out
+// of queue_ instead of leaving it settling for the life of the process. Caught
+// around the call only, whatever builds its arguments is the caller's own.
+//
+// The call stays written out at every site, not forwarded through a wrapper
+// that takes the arguments: bin/csms-sql-guard (T038) reads each
+// `<obj>.execute(` and its `quiet` argument by position — a forwarding
+// template is one call with `std::forward<Args>(args)...`, which it takes for
+// plain, and every response store (credentials in headers and body) would
+// leave its inventory.
+template <typename Send>
+void PGFetch::settle_guarded(const std::shared_ptr<FetchTask>& task, Send&& send)
 {
     try {
-        pool_.execute(std::forward<Args>(args)...);
+        send();
     } catch (const std::exception& e) {
         settle_threw(task, e.what());
     }

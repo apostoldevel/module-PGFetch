@@ -98,8 +98,8 @@ private:
     void check_timeouts(std::chrono::steady_clock::time_point now);
     void remove_task(const std::string& id);
     void settle_threw(const std::shared_ptr<FetchTask>& task, std::string_view what);
-    template <typename... Args>
-    void settle_execute(const std::shared_ptr<FetchTask>& task, Args&&... args);
+    template <typename Send>
+    void settle_guarded(const std::shared_ptr<FetchTask>& task, Send&& send);
 
     PgPool&      pool_;
     Logger&      log_;
