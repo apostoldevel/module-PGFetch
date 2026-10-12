@@ -97,6 +97,7 @@ private:
     void process_queue();
     void check_timeouts(std::chrono::steady_clock::time_point now);
     void remove_task(const std::string& id);
+    void settle_threw(const std::shared_ptr<FetchTask>& task, std::string_view what);
 
     PgPool&      pool_;
     Logger&      log_;
